@@ -16,13 +16,15 @@ ferromax_v0.8/
 │   ├── repository/                    # JPA repositories
 │   ├── model/                         # JPA entities
 │   ├── dto/                           # Request/Response DTOs
+│   ├── exception/                     # Exception handlers
 │   ├── security/                      # JWT filter, Spring Security config
 │   └── config/                        # WebSocket, CORS, data init
 ├── ferromax-web/                      # React + Vite frontend
 │   └── src/
 │       ├── pages/                     # Route-level page components
 │       ├── components/                # Reusable UI components
-│       ├── services/                  # Axios API service modules
+│       ├── api/                       # Shared Axios client instance
+│       ├── services/                  # Per-resource API service modules
 │       └── context/                   # AuthContext (JWT state)
 ├── scripts/                           # Python data import utilities
 └── data/                              # Product catalog XLSX
@@ -46,11 +48,11 @@ The server listens on **port 8081** with a context path of **`/api`**, so every 
 
 The React SPA is a Vite project under `ferromax-web/`. Routing is handled by **react-router-dom v7**, with routes declared in `App.jsx`. There are three route categories:
 
-- **Public routes** — `/tienda`, `/tienda/login`, `/catalogo`, and `/catalogo/:categoria` are accessible without a token.
+- **Public routes** — `/tienda`, `/tienda/login`, `/tienda/confirmacion`, `/tienda/mis-pedidos`, `/catalogo`, and `/catalogo/:categoria` are accessible without a token.
 - **Employee routes** — wrapped in `<ProtectedRoute requiereEmpleado>`, accessible to both ADMIN and EMPLEADO roles. Includes `/pos`, `/productos`, `/ventas`, and `/recepcion`.
 - **Admin-only routes** — wrapped in `<ProtectedRoute requiereAdmin>`, restricted to ADMIN. Includes `/` (dashboard), `/remitos`, `/ajuste-stock`, and `/ingreso-factura`.
 
-All HTTP calls go through Axios service modules in `src/services/`. A shared Axios instance attaches the JWT from `AuthContext` as an `Authorization: Bearer <token>` header on every outbound request. UI styling uses **TailwindCSS 4**, transitions and page-level animations use **Framer Motion**, and dashboard charts are rendered with **Recharts**.
+All HTTP calls go through a shared Axios client instance at `src/api/axiosClient.js`. A request interceptor reads the JWT from `localStorage` under the key `ferromax_token` and attaches it as an `Authorization: Bearer <token>` header on every outbound request. Higher-level service modules in `src/services/` wrap this client with per-resource API calls. UI styling uses **TailwindCSS 4**, transitions and page-level animations use **Framer Motion**, and dashboard charts are rendered with **Recharts**.
 
 ## Authentication Flow
 
@@ -61,13 +63,13 @@ Ferromax uses stateless JWT authentication. The sequence below covers a complete
     The frontend `POST`s `{ email, password }` to `/api/auth/login`. Spring Security's `DaoAuthenticationProvider` verifies the credentials against the BCrypt-hashed password in the database.
   </Step>
   <Step title="Server issues a JWT">
-    On success, `AuthController` calls `JwtService` to sign a token containing the user's email and role. The response body includes `token`, `rol`, `nombre`, and `mensaje`.
+    On success, `AuthController` calls `JwtTokenProvider` to sign a token containing the user's email, role, and user ID. The response body includes `token`, `rol`, `nombre`, and `mensaje`.
   </Step>
   <Step title="Client stores the token">
-    `AuthContext` stores the token in React state (and optionally in `localStorage` for session persistence). All subsequent Axios requests include the header `Authorization: Bearer <token>`.
+    The frontend stores the token in `localStorage` under the key `ferromax_token`. All subsequent Axios requests include the header `Authorization: Bearer <token>`, attached automatically by the interceptor in `src/api/axiosClient.js`.
   </Step>
   <Step title="Filter validates each request">
-    `JwtAuthenticationFilter` intercepts every incoming request, extracts the token from the `Authorization` header, validates the signature and expiry via `JwtService`, and loads the `UserDetails` from the database. If valid, it populates the Spring Security `SecurityContextHolder` for the duration of the request.
+    `JwtAuthenticationFilter` intercepts every incoming request, extracts the token from the `Authorization` header, validates the signature and expiry via `JwtTokenProvider`, and loads the `UserDetails` from the database. If valid, it populates the Spring Security `SecurityContextHolder` for the duration of the request.
   </Step>
   <Step title="Role check enforces access">
     `SecurityConfig` defines URL-level rules (e.g., `GET /dashboard/**` requires `ROLE_ADMIN`). Individual controller methods may also carry `@PreAuthorize` annotations for fine-grained method-level enforcement, enabled by `@EnableMethodSecurity`.
@@ -75,7 +77,7 @@ Ferromax uses stateless JWT authentication. The sequence below covers a complete
 </Steps>
 
 <Note>
-  JWTs expire after **8 hours** (`jwt.expiration=28800000 ms`). A refresh token mechanism is configured with a 7-day TTL. Clients should handle `401 Unauthorized` responses by redirecting the user back to the login page.
+  JWTs expire after **8 hours** (`jwt.expiration=28800000 ms`). A separate refresh expiration is configured at 7 days (`app.jwt.refresh-expiration-ms=604800000 ms`). Clients should handle `401 Unauthorized` responses by redirecting the user back to the login page.
 </Note>
 
 ## Real-time Updates
@@ -84,7 +86,7 @@ Stock changes need to reach every open admin session instantly — polling is to
 
 | Property | Value |
 |---|---|
-| **STOMP endpoint** | `/api/ws` |
+| **STOMP endpoint** | `/ws` (externally `/api/ws` due to servlet context path) |
 | **SockJS fallback** | Enabled (transparent HTTP long-polling for environments that block WebSockets) |
 | **Topic prefix** | `/topic` |
 | **App destination prefix** | `/app` |
@@ -130,5 +132,5 @@ GET  /api/img/**
 All other endpoints require a valid JWT. Sessions are fully **stateless** — `SessionCreationPolicy.STATELESS` is set in `SecurityConfig`, so the server holds no session state between requests.
 
 <Warning>
-  CORS is currently configured to allow origins `localhost:5173` through `localhost:5175` only. Before deploying to a staging or production environment, update the `allowedOrigins` list in `SecurityConfig.corsConfigurationSource()` to match your actual domain.
+  CORS is currently configured to allow `localhost:5173` through `localhost:5175` (and their `127.0.0.1` equivalents) only. Before deploying to a staging or production environment, update the `allowedOrigins` list in `SecurityConfig.corsConfigurationSource()` to match your actual domain.
 </Warning>

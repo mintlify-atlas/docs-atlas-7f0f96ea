@@ -18,17 +18,17 @@ The embedded Tomcat server is pre-configured to expose the API under the `/api` 
 
 ## WebSocket / STOMP
 
-Ferromax ERP uses STOMP over SockJS for real-time features such as low-stock alerts and live dashboard updates. The WebSocket settings below are read by `WebSocketConfig.java` and by Spring's property injection.
+Ferromax ERP uses STOMP over SockJS for real-time features such as low-stock alerts and live dashboard updates. The `app.websocket.*` properties in `application.properties` document the intended topology of the WebSocket broker. Note that `WebSocketConfig.java` currently uses a hardcoded `.setAllowedOriginPatterns("*")` for the SockJS endpoint — the `app.websocket.allowed-origins` property is defined in `application.properties` but is not yet injected into `WebSocketConfig.java`.
 
 | Property | Default | Description |
 |---|---|---|
 | `app.websocket.endpoint` | `/ws` | The SockJS handshake endpoint. The full URL in development is `http://localhost:8081/ws`. |
 | `app.websocket.topic-prefix` | `/topic` | Prefix for server-to-client broadcast destinations (e.g., `/topic/alertas`). |
 | `app.websocket.app-prefix` | `/app` | Prefix for client-to-server message destinations handled by `@MessageMapping` controllers. |
-| `app.websocket.allowed-origins` | `http://localhost:3000, http://localhost:4200, http://localhost:5173, http://localhost:5174, http://localhost:5175` | Comma-separated list of origins permitted to open a WebSocket connection. The frontend `.env` also exposes `VITE_WS_URL=http://localhost:8081/ws` for the client-side connection string. |
+| `app.websocket.allowed-origins` | `http://localhost:3000,http://localhost:4200,http://localhost:5173,http://localhost:5174,http://localhost:5175` | Intended comma-separated list of origins permitted to open a WebSocket connection. The frontend `.env` also exposes `VITE_WS_URL=http://localhost:8081/ws` for the client-side connection string. |
 
 <Warning>
-  Production deployments must add the actual frontend domain to `app.websocket.allowed-origins`. Leaving the list set to `localhost` origins will block all real-user WebSocket connections in production.
+  `WebSocketConfig.java` currently calls `.setAllowedOriginPatterns("*")`, which allows WebSocket connections from any origin. Before deploying to production, wire `app.websocket.allowed-origins` into `WebSocketConfig.java` via `@Value` and replace the wildcard with that explicit list to restrict WebSocket access to known frontend origins only.
 </Warning>
 
 ## Caching
@@ -117,9 +117,9 @@ VITE_WS_URL=http://localhost:8081/ws
 
 | Variable | Value | Description |
 |---|---|---|
-| `VITE_API_URL` | `http://localhost:8081/api` | Base URL for all REST calls. Note that `axiosClient.js` uses the Vite dev proxy path `/api` at runtime — this variable is the fallback for non-proxied builds. |
+| `VITE_API_URL` | `http://localhost:8081/api` | Base URL for the backend REST API. Useful for tooling, scripts, and any custom integrations that need to reference the API origin directly. |
 | `VITE_WS_URL` | `http://localhost:8081/ws` | WebSocket endpoint URL passed to the SockJS client constructor. |
 
 <Note>
-  In `ferromax-web/src/api/axiosClient.js`, `baseURL` is set to the relative path `/api` so that Vite's dev-server proxy forwards requests transparently. `VITE_API_URL` becomes the effective base URL in production builds where no proxy is present.
+  In `ferromax-web/src/api/axiosClient.js`, `baseURL` is hardcoded to the relative path `'/api'`. Vite's dev-server proxy transparently forwards those requests to the backend. `VITE_API_URL` is not read by `axiosClient.js` — it is available for scripts and custom integrations that need the full backend origin.
 </Note>

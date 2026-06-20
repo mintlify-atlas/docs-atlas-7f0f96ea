@@ -41,8 +41,8 @@ The service iterates over the 7 days ending today (Argentina time zone `America/
 
 ```java
 public record VentaDiariaDTO(
-    LocalDate  fecha,       // e.g. "2025-06-10"
-    BigDecimal totalVentas  // ARS total for that day; 0 if no sales
+    LocalDate  fecha,  // e.g. "2025-06-10"
+    BigDecimal total   // ARS total for that day; 0 if no sales
 ) {}
 ```
 
@@ -63,8 +63,8 @@ public record VentaResponse(
     Long           id,
     OffsetDateTime fecha,
     BigDecimal     total,
-    String         estado,       // COMPLETADA | PENDIENTE | ANULADA
-    String         medioPago,    // EFECTIVO | DEBITO | CREDITO | MERCADOPAGO
+    String         estado,    // COMPLETADA | PENDIENTE | ANULADA
+    String         medioPago, // EFECTIVO | DEBITO | CREDITO | MERCADOPAGO
     String         nombreCajero,
     Integer        cantidadItems,
     String         origen        // POS | WEB

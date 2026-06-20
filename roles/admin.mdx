@@ -1,7 +1,7 @@
 ---
 title: "Admin Role: Full System Access in Ferromax ERP"
 sidebarTitle: "Admin"
-description: "The Admin role has unrestricted access to all Ferromax ERP modules: dashboard KPIs, product management, sales history, stock adjustments, remito approvals, and invoice OCR."
+description: "The Admin role grants full Ferromax ERP access: dashboard KPIs, product management, sales history, stock adjustments, remito approvals, and OCR invoicing."
 ---
 
 The `ADMIN` role is reserved for business owners and managers who need full visibility and control over every system operation. Admins are the only users who can see purchase (cost) prices, supplier names, voided transactions, pending remito approvals, stock adjustment logs, and the invoice OCR pipeline. In a typical Ferromax installation, the admin is José Rodríguez — the store owner who monitors daily KPIs, reviews cash flow, and acts on low-stock alerts.
@@ -74,15 +74,16 @@ The table below lists every endpoint that requires the `ADMIN` role, sourced dir
 | `GET` | `/recepciones-remito/pendientes` | Remitos awaiting admin approval |
 | `GET` | `/recepciones-remito` | All remito receipts |
 | `PATCH` | `/recepciones-remito/{id}/confirmar` | Approve or reject a remito |
-| `GET` | `/proveedores/**` | Full supplier management (GET list is also visible to EMPLEADO) |
+| `GET` | `/proveedores` | Supplier list — also accessible to EMPLEADO |
+| `POST`, `PUT`, `DELETE` | `/proveedores/**` | Create, update, and delete suppliers — ADMIN-only |
 
 <Info>
-  Endpoints shared with EMPLEADO (e.g., `POST /ventas`, `POST /recepcion`, `POST /recepciones-remito`, `GET /recepciones-remito/mis-recepciones`, `GET /recepciones-remito/{id}`) are accessible to ADMIN as well. See the [Empleado](/roles/empleado) page for the full shared-access list.
+  The following endpoints are shared between ADMIN and EMPLEADO: `POST /ventas`, `GET /ventas/{id}`, `GET /ventas/{id}/detalle`, `POST /recepcion`, `POST /recepciones-remito`, `GET /recepciones-remito/mis-recepciones`, `GET /recepciones-remito/{id}`, and `GET /proveedores`. See the [Empleado](/roles/empleado) page for the full shared-access list.
 </Info>
 
 ## Frontend Routes (Admin)
 
-The React application (`App.jsx`) guards admin-only pages with `<ProtectedRoute requiereAdmin>`:
+The React application (`App.jsx`) guards these pages with `<ProtectedRoute requiereAdmin>`, making them accessible only to admins:
 
 | Route | Component | Description |
 |---|---|---|
@@ -90,6 +91,15 @@ The React application (`App.jsx`) guards admin-only pages with `<ProtectedRoute 
 | `/remitos` | `RemitosPage` | Pending remito list and approval flow |
 | `/ajuste-stock` | `AjusteStockPage` | Manual stock adjustment form and history |
 | `/ingreso-factura` | `IngresoFacturaPage` | Invoice OCR upload and confirmation |
+
+Admins also have full access to the `<ProtectedRoute requiereEmpleado>` routes, because `isEmpleado()` in `AuthContext.jsx` returns `true` for both `ADMIN` and `EMPLEADO` roles:
+
+| Route | Component | Description |
+|---|---|---|
+| `/pos` | `POS` | Barcode-scanner POS terminal |
+| `/recepcion` | `RecepcionPage` | Single-item stock receipt form |
+| `/productos` | `Productos` | Product browser |
+| `/ventas` | `Ventas` | Full sales history (admins see all cashiers) |
 
 ## What Admins Cannot Do
 

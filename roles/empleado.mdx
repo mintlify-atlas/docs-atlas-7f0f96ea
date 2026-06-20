@@ -1,7 +1,7 @@
 ---
-title: "Empleado Role: POS and Stock Operations"
+title: "Empleado Role: POS Terminal and Stock Operations in Ferromax"
 sidebarTitle: "Empleado"
-description: "The Empleado role gives store employees access to the POS terminal, product lookup (without cost prices), goods receipt, and remito creation in Ferromax ERP."
+description: "The Empleado role gives store staff access to the POS terminal, product lookup without cost prices, goods receipt, and remito creation in Ferromax ERP."
 ---
 
 The `EMPLEADO` role is designed for store floor staff. Employees process in-store sales via the POS terminal, receive merchandise arriving from suppliers, and create delivery note (remito) receipts — all without ever seeing sensitive cost pricing or supplier data. Speed is the top priority in the employee workflow: the POS terminal is optimized for barcode-scanner-driven checkout, and every endpoint an employee uses is scoped to only the data their job requires.
@@ -60,7 +60,7 @@ The following endpoints are restricted to `EMPLEADO` (or shared between `ADMIN` 
 | `POST` | `/recepciones-remito` | ADMIN, EMPLEADO | Create a new remito receipt header |
 | `GET` | `/recepciones-remito/mis-recepciones` | ADMIN, EMPLEADO | List remitos created by the authenticated user |
 | `GET` | `/recepciones-remito/{id}` | ADMIN, EMPLEADO | Detail of a specific remito |
-| `GET` | `/proveedores` | ADMIN, EMPLEADO | Read-only supplier list |
+| `GET` | `/proveedores` | ADMIN, EMPLEADO | Read-only supplier list (all write operations on `/proveedores/**` are ADMIN-only) |
 
 ## Restrictions
 

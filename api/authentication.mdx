@@ -1,5 +1,5 @@
 ---
-title: "Authenticate with Ferromax ERP API"
+title: "Ferromax ERP API Authentication — Login, Register, JWT"
 sidebarTitle: "Authentication"
 description: "Obtain a JWT token via POST /auth/login, register new customer accounts with POST /auth/register, and retrieve the current user with GET /auth/me."
 ---
@@ -211,7 +211,7 @@ After a successful login the frontend stores the token and attaches it automatic
     Post the user's email and password. On success, save the returned `token` string.
   </Step>
   <Step title="Store the token">
-    The React frontend persists the token in `localStorage` (key: `ferromax_token`) and exposes the authenticated user via `AuthContext.jsx`.
+    The React frontend persists the token in `localStorage` (key: `token`) via `authService.js` and exposes the authenticated user via `AuthContext.jsx`. Note that `axiosClient.js` reads the token from a separate `localStorage` key (`ferromax_token`) — these two keys co-exist independently in the frontend.
   </Step>
   <Step title="Attach the header">
     Include `Authorization: Bearer <token>` in every request to a protected endpoint. The Axios client does this automatically via a request interceptor.

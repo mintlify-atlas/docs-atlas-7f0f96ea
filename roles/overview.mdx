@@ -1,7 +1,7 @@
 ---
-title: "User Roles and Access Control in Ferromax ERP"
+title: "Ferromax ERP User Roles and Access Control Guide"
 sidebarTitle: "Overview"
-description: "Ferromax ERP enforces three roles — Admin, Empleado, and Cliente — each with distinct API permissions and UI access. Learn how roles are assigned and enforced."
+description: "Ferromax ERP has three roles — Admin, Empleado, and Cliente — each with distinct API permissions and frontend routes. Learn how role assignment works."
 ---
 
 Ferromax ERP enforces role-based access control through Spring Security's `@PreAuthorize` annotations. Three roles are defined in `RolEnum`: **ADMIN**, **EMPLEADO**, and **CLIENTE**. Every protected API request is validated against the role embedded in the caller's JWT token — no session state is stored server-side. Understanding which role can reach which endpoint is the foundation for onboarding new staff, debugging `403 Forbidden` errors, and designing integrations.

@@ -1,7 +1,7 @@
 ---
 title: "Inventory Management: Stock, Receipts, and Adjustments"
 sidebarTitle: "Inventory"
-description: "Manage Ferromax ERP inventory through goods receipt (recepción directa), remito-based supplier delivery workflows, manual stock adjustments, and a full movement audit trail."
+description: "Manage Ferromax ERP inventory with direct goods receipt, remito-based supplier delivery workflows, manual adjustments, and a full audit trail."
 ---
 
 Ferromax ERP provides three distinct ways to change stock levels: direct goods receipt for quick single-item additions, the two-step remito workflow for multi-item supplier deliveries, and manual stock adjustments for corrections and write-offs. Every operation — regardless of which path is used — creates a `MovimientoStock` audit record so that the full history of every SKU is always traceable.
@@ -24,7 +24,7 @@ The `RecepcionRequest` body:
 {
   "productoId": 42,
   "cantidad": 10,
-  "observaciones": "Remito N° 1234, proveedor EPSA"
+  "notas": "Remito N° 1234, proveedor EPSA"
 }
 ```
 
@@ -32,7 +32,7 @@ The `RecepcionRequest` body:
 |---|---|---|---|
 | `productoId` | `Long` | ✅ | Internal product ID |
 | `cantidad` | `Integer` | ✅ | Units to add to stock |
-| `observaciones` | `String` | — | Free-text note (e.g. remito number) |
+| `notas` | `String` | — | Free-text note, max 500 chars (e.g. remito number) |
 
 On success the endpoint returns a `RecepcionResponse` (`201 Created`) with the product name, SKU, units received, previous stock, and new stock. The `RecepcionPage.jsx` UI shows these values in a confirmation panel with a **"Recibir otro producto"** button.
 
@@ -57,14 +57,18 @@ For multi-item supplier deliveries that require admin review before stock is upd
     ```json
     {
       "proveedorId": 5,
-      "items": [
-        { "productoId": 12, "cantidad": 20 },
-        { "productoId": 37, "cantidad": 5 }
-      ]
+      "numeroRemito": "R-00042",
+      "notas": "Entrega parcial, faltan 3 ítems"
     }
     ```
 
-    The remito is saved with status `PENDIENTE`. The employee can view their own submitted remitos at `GET /api/recepciones-remito/mis-recepciones`.
+    | Field | Type | Required | Description |
+    |---|---|---|---|
+    | `proveedorId` | `Long` | ✅ | Internal supplier ID |
+    | `numeroRemito` | `String` | ✅ | Delivery-note number from the supplier (max 100 chars) |
+    | `notas` | `String` | — | Free-text note (max 500 chars) |
+
+    The remito header is saved with status `PENDIENTE`. Individual product lines are linked to this remito later by including the returned `id` as `recepcionRemitoId` in each `POST /api/recepcion` call. The employee can view their own submitted remitos at `GET /api/recepciones-remito/mis-recepciones`.
   </Step>
   <Step title="Admin reviews pending remitos">
     An admin fetches all unconfirmed remitos:

@@ -125,7 +125,7 @@ Returns the 10 most recent sale records, regardless of status, ordered by date d
 </ResponseField>
 
 <ResponseField name="[].medioPago" type="string">
-  Payment method. One of: `EFECTIVO`, `TRANSFERENCIA`, `TARJETA_DEBITO`, `TARJETA_CREDITO`, `CUENTA_CORRIENTE`.
+  Payment method. One of: `EFECTIVO`, `DEBITO`, `CREDITO`, `MERCADOPAGO`.
 </ResponseField>
 
 <ResponseField name="[].nombreCajero" type="string">
@@ -137,7 +137,7 @@ Returns the 10 most recent sale records, regardless of status, ordered by date d
 </ResponseField>
 
 <ResponseField name="[].origen" type="string">
-  Sale origin channel. One of: `POS`, `PEDIDO`. Defaults to `"POS"` when origin is not recorded.
+  Sale origin channel. One of: `POS` (in-store sale by an `ADMIN` or `EMPLEADO`), `WEB` (online order by a `CLIENTE`).
 </ResponseField>
 
 ```bash
@@ -162,10 +162,10 @@ curl -X GET http://localhost:8081/api/dashboard/transacciones \
     "fecha": "2024-06-10T13:55:30-03:00",
     "total": 23400.50,
     "estado": "COMPLETADA",
-    "medioPago": "TRANSFERENCIA",
+    "medioPago": "MERCADOPAGO",
     "nombreCajero": "Carlos Ferreyra",
     "cantidadItems": 7,
-    "origen": "PEDIDO"
+    "origen": "WEB"
   }
 ]
 ```

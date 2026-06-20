@@ -1,7 +1,7 @@
 ---
-title: "Supplier Invoice OCR: Automated Stock Ingestion"
+title: "Supplier Invoice OCR: Automated Stock Ingestion from PDFs"
 sidebarTitle: "Invoice Scanning"
-description: "Upload supplier invoices as PDF or image files. Ferromax ERP uses OCR to extract line items, match products by code, and create stock receipts with admin confirmation."
+description: "Upload supplier invoices as PDF or image. Ferromax ERP uses OCR to extract line items, match products by SKU, and update stock on confirmation."
 ---
 
 The invoice scanning module lets admins upload a supplier invoice (PDF or image) and have Ferromax ERP automatically extract product codes, quantities, and unit prices using OCR — eliminating manual data entry for high-volume stock ingestion. The module is accessible at `/ingreso-factura` and is restricted to the **ADMIN** role.
@@ -130,7 +130,7 @@ ocr.space.api.key=YOUR_API_KEY_HERE
 private String ocrSpaceApiKey;
 ```
 
-The free tier of OCR.space supports **25,000 API requests per month**. For production environments with high invoice volumes, consider upgrading to a paid OCR.space tier or replacing the cloud call with a self-hosted Tesseract instance via the Tess4j Java wrapper.
+The free tier of OCR.space supports **25,000 API requests per month**. For production environments with high invoice volumes, consider upgrading to a paid OCR.space tier.
 
 The API call is configured with the following parameters for best accuracy on Spanish-language hardware invoices:
 
@@ -166,6 +166,4 @@ Each `FacturaIngresoResumenDTO` entry in `content` includes: `id`, `numeroFactur
 OCR accuracy depends heavily on the print quality and scan resolution of the source invoice. Always review every extracted line item in the revision table before clicking **Confirmar ingreso** — incorrect quantities will update stock levels immediately on confirmation and the operation cannot be undone automatically.
 </Warning>
 
-<Note>
-If you are using image-based OCR via the Tess4j wrapper instead of the OCR.space API, Tesseract must be installed as a native binary on the host machine. Tess4j is a Java JNA wrapper for Tesseract; the underlying C++ engine must be present separately. On Debian/Ubuntu: `apt-get install tesseract-ocr tesseract-ocr-spa`. On macOS: `brew install tesseract`. The language data file for Spanish (`spa.traineddata`) must also be present in the Tesseract `tessdata` directory.
-</Note>
+

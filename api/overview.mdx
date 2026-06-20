@@ -1,7 +1,7 @@
 ---
-title: "Ferromax ERP REST API Reference"
+title: "Ferromax ERP REST API Reference — Integration Guide"
 sidebarTitle: "Overview"
-description: "The Ferromax ERP REST API exposes endpoints for products, sales, inventory, dashboard, catalog, and real-time WebSocket events. Base URL: http://localhost:8081/api."
+description: "Ferromax ERP REST API: endpoints for products, sales, inventory, dashboard, catalog, and WebSocket events. Base URL: http://localhost:8081/api."
 ---
 
 The Ferromax ERP API is a RESTful HTTP API built with Spring Boot 3.2.5 on Java 17. It serves both the internal ERP frontend and the public storefront, with endpoints grouped by resource and protected by role-based JWT authorization. All responses are JSON; every protected route requires a valid Bearer token issued by `POST /auth/login`.
