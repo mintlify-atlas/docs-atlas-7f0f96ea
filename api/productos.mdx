@@ -1,0 +1,399 @@
+---
+title: "Products API: CRUD, Barcode Lookup, and Public Catalog"
+sidebarTitle: "Products"
+description: "REST endpoints for product management in Ferromax ERP. Covers admin CRUD, employee barcode/SKU lookup, and the public catalog endpoint."
+---
+
+The `/productos` endpoints manage the hardware store product catalog. They offer three access levels: full CRUD for admins (including cost price and supplier data), read-only lookup for employees (no sensitive pricing), and a public catalog for the storefront. All authenticated endpoints require a JWT Bearer token in the `Authorization` header.
+
+---
+
+## GET /api/productos
+
+Returns all active products with full admin data, including purchase price and supplier name.
+
+**Auth:** `ADMIN`
+
+### Response `200 OK`
+
+Returns an array of `ProductoDTO` objects.
+
+<ResponseField name="id" type="Long">
+  Internal product identifier.
+</ResponseField>
+
+<ResponseField name="sku" type="string">
+  Unique stock-keeping unit code. Maximum 50 characters.
+</ResponseField>
+
+<ResponseField name="codigoBarras" type="string">
+  EAN / barcode string. Maximum 100 characters. May be `null` if not assigned.
+</ResponseField>
+
+<ResponseField name="nombre" type="string">
+  Display name of the product. Maximum 200 characters.
+</ResponseField>
+
+<ResponseField name="descripcion" type="string">
+  Long-form product description (plain text). May be `null`.
+</ResponseField>
+
+<ResponseField name="precio" type="BigDecimal">
+  Retail selling price. Precision `12,2`. Never negative.
+</ResponseField>
+
+<ResponseField name="stockActual" type="Integer">
+  Current units in stock.
+</ResponseField>
+
+<ResponseField name="stockMinimo" type="Integer">
+  Minimum stock threshold. Products at or below this value appear in `/stock-critico`.
+</ResponseField>
+
+<ResponseField name="activo" type="boolean">
+  `true` if the product is active; `false` if soft-deleted.
+</ResponseField>
+
+<ResponseField name="imagenUrl" type="string">
+  URL to the product image. Maximum 500 characters. May be `null`.
+</ResponseField>
+
+<ResponseField name="nombreCategoria" type="string">
+  Display name of the assigned category. May be `null`.
+</ResponseField>
+
+<ResponseField name="nombreProveedor" type="string">
+  Display name of the assigned supplier. **Admin-only field.** May be `null`.
+</ResponseField>
+
+<Note>
+  The `precio` field maps to the `precio` column on the `Producto` entity. There is no separate `precioCompra` field in `ProductoDTO`; supplier cost data is accessed through the `nombreProveedor` association.
+</Note>
+
+---
+
+## GET /api/productos/\{id\}
+
+Returns a single product by its internal ID.
+
+**Auth:** `ADMIN`
+
+### Path Parameters
+
+<ParamField path="id" type="Long" required>
+  Internal product identifier.
+</ParamField>
+
+### Response `200 OK`
+
+Returns a `ProductoDTO`. See [GET /api/productos](#get-apiproductos) for field descriptions.
+
+---
+
+## GET /api/productos/sku/\{sku\}
+
+Looks up a product by its SKU code.
+
+**Auth:** `ADMIN`
+
+### Path Parameters
+
+<ParamField path="sku" type="string" required>
+  The SKU to search. Case-sensitive, unique across the catalog.
+</ParamField>
+
+### Response `200 OK`
+
+Returns a `ProductoDTO`.
+
+---
+
+## GET /api/productos/barcode/\{codigo\}
+
+Looks up a product by its barcode or EAN.
+
+**Auth:** `ADMIN`
+
+### Path Parameters
+
+<ParamField path="codigo" type="string" required>
+  The barcode / EAN-13 string to search.
+</ParamField>
+
+### Response `200 OK`
+
+Returns a `ProductoDTO`.
+
+---
+
+## GET /api/productos/stock-critico
+
+Returns all products whose `stockActual` is at or below their `stockMinimo`. Use this endpoint to drive low-stock alerts or reorder workflows.
+
+**Auth:** `ADMIN`
+
+### Response `200 OK`
+
+Returns an array of `ProductoDTO`. The array is empty when no products are in a critical stock state.
+
+---
+
+## GET /api/productos/publico
+
+Returns the public product catalog. This endpoint requires **no authentication** and is intended for the Tienda storefront. It omits cost price, supplier data, and internal stock thresholds.
+
+**Auth:** None (public)
+
+### Response `200 OK`
+
+Returns an array of `ProductoPublicoDTO`.
+
+<ResponseField name="id" type="Long">
+  Internal product identifier.
+</ResponseField>
+
+<ResponseField name="nombre" type="string">
+  Product display name.
+</ResponseField>
+
+<ResponseField name="precio" type="BigDecimal">
+  Retail selling price.
+</ResponseField>
+
+<ResponseField name="stockActual" type="Integer">
+  Current units available.
+</ResponseField>
+
+<ResponseField name="imagenUrl" type="string">
+  Product image URL. May be `null`.
+</ResponseField>
+
+<ResponseField name="nombreCategoria" type="string">
+  Category display name. May be `null`.
+</ResponseField>
+
+<Tip>
+  Because this endpoint is unauthenticated, it is safe to call directly from browser JavaScript or a CDN-cached layer. Only active products (`activo = true`) are included.
+</Tip>
+
+---
+
+## GET /api/productos/empleado
+
+Returns all active products without cost price or supplier data. Designed for POS terminal use where employees need pricing and stock but must not see purchasing cost.
+
+**Auth:** `EMPLEADO`
+
+### Response `200 OK`
+
+Returns an array of `ProductoEmpleadoDTO`.
+
+<ResponseField name="id" type="Long">
+  Internal product identifier.
+</ResponseField>
+
+<ResponseField name="sku" type="string">
+  Unique SKU code.
+</ResponseField>
+
+<ResponseField name="codigoBarras" type="string">
+  Barcode / EAN string. May be `null`.
+</ResponseField>
+
+<ResponseField name="nombre" type="string">
+  Product display name.
+</ResponseField>
+
+<ResponseField name="descripcion" type="string">
+  Long-form description. May be `null`.
+</ResponseField>
+
+<ResponseField name="precio" type="BigDecimal">
+  Retail selling price. Cost price is intentionally excluded.
+</ResponseField>
+
+<ResponseField name="stockActual" type="Integer">
+  Current units in stock.
+</ResponseField>
+
+<ResponseField name="stockMinimo" type="Integer">
+  Minimum stock threshold.
+</ResponseField>
+
+<ResponseField name="imagenUrl" type="string">
+  Product image URL. May be `null`.
+</ResponseField>
+
+<ResponseField name="nombreCategoria" type="string">
+  Category display name. May be `null`.
+</ResponseField>
+
+---
+
+## GET /api/productos/empleado/sku/\{sku\}
+
+Looks up a single product by SKU for an authenticated employee.
+
+**Auth:** `EMPLEADO`
+
+### Path Parameters
+
+<ParamField path="sku" type="string" required>
+  The SKU to search.
+</ParamField>
+
+### Response `200 OK`
+
+Returns a `ProductoEmpleadoDTO`. See [GET /api/productos/empleado](#get-apiproductosempleado) for field descriptions.
+
+---
+
+## GET /api/productos/empleado/barcode/\{codigo\}
+
+Looks up a single product by barcode for an authenticated employee. Useful for scanning workflows at the POS terminal.
+
+**Auth:** `EMPLEADO`
+
+### Path Parameters
+
+<ParamField path="codigo" type="string" required>
+  The barcode / EAN to search.
+</ParamField>
+
+### Response `200 OK`
+
+Returns a `ProductoEmpleadoDTO`.
+
+---
+
+## POST /api/productos
+
+Creates a new product in the catalog.
+
+**Auth:** `ADMIN`
+
+### Request Body
+
+<ParamField body="sku" type="string" required>
+  Unique SKU code. Maximum 50 characters. Must not already exist in the catalog.
+</ParamField>
+
+<ParamField body="nombre" type="string" required>
+  Product display name. Maximum 200 characters.
+</ParamField>
+
+<ParamField body="precio" type="BigDecimal" required>
+  Retail selling price. Must be `≥ 0.00`.
+</ParamField>
+
+<ParamField body="codigoBarras" type="string">
+  Barcode / EAN string. Maximum 100 characters. Optional.
+</ParamField>
+
+<ParamField body="descripcion" type="string">
+  Long-form product description. Optional.
+</ParamField>
+
+<ParamField body="precioCompra" type="BigDecimal">
+  Supplier purchase cost. Optional; stored but not exposed to non-admin roles.
+</ParamField>
+
+<ParamField body="stockMinimo" type="Integer">
+  Minimum stock alert threshold. Defaults to `0` if omitted.
+</ParamField>
+
+<ParamField body="imagenUrl" type="string">
+  URL of the product image. Optional.
+</ParamField>
+
+<ParamField body="categoriaId" type="Long">
+  ID of an existing category. Optional.
+</ParamField>
+
+<ParamField body="proveedorId" type="Long">
+  ID of an existing supplier. Optional.
+</ParamField>
+
+### Response `201 Created`
+
+Returns the newly created `ProductoDTO`.
+
+```bash
+curl -X POST http://localhost:8081/api/productos \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sku": "FRX-TALADRO-01",
+    "nombre": "Taladro Percutor 750W",
+    "descripcion": "Taladro percutor profesional con maletín y 15 brocas",
+    "codigoBarras": "7790001234567",
+    "precio": 84999.99,
+    "precioCompra": 52000.00,
+    "stockMinimo": 3,
+    "categoriaId": 4,
+    "proveedorId": 2,
+    "imagenUrl": "https://cdn.ferromax.com.ar/productos/taladro-750w.jpg"
+  }'
+```
+
+---
+
+## PUT /api/productos/\{id\}
+
+Updates an existing product. Only the fields included in the request body are changed; omitted fields retain their current values.
+
+**Auth:** `ADMIN`
+
+### Path Parameters
+
+<ParamField path="id" type="Long" required>
+  Internal product identifier.
+</ParamField>
+
+### Request Body
+
+<ParamField body="nombre" type="string">
+  New display name. Maximum 200 characters.
+</ParamField>
+
+<ParamField body="precio" type="BigDecimal">
+  New retail selling price. Must be `≥ 0.00` if provided.
+</ParamField>
+
+<ParamField body="stockMinimo" type="Integer">
+  New minimum stock threshold.
+</ParamField>
+
+<ParamField body="imagenUrl" type="string">
+  New product image URL. Maximum 500 characters.
+</ParamField>
+
+<ParamField body="codigoBarras" type="string">
+  New barcode / EAN. Maximum 100 characters.
+</ParamField>
+
+### Response `200 OK`
+
+Returns the updated `ProductoDTO`.
+
+---
+
+## DELETE /api/productos/\{id\}
+
+Soft-deletes (deactivates) a product by setting `activo = false`. The product record and all associated stock movement history are preserved in the database and can be restored by an admin at the database level.
+
+**Auth:** `ADMIN`
+
+### Path Parameters
+
+<ParamField path="id" type="Long" required>
+  Internal product identifier.
+</ParamField>
+
+### Response `204 No Content`
+
+Empty body. The product no longer appears in any active product listing.
+
+<Warning>
+  Soft-deleted products remain visible via the `/stock-critico` endpoint if their stock was below the minimum at the time of deletion. Ensure any open orders referencing the product are resolved before deactivating it.
+</Warning>

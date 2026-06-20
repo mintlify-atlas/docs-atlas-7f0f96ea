@@ -1,0 +1,101 @@
+---
+title: "Admin Role: Full System Access in Ferromax ERP"
+sidebarTitle: "Admin"
+description: "The Admin role has unrestricted access to all Ferromax ERP modules: dashboard KPIs, product management, sales history, stock adjustments, remito approvals, and invoice OCR."
+---
+
+The `ADMIN` role is reserved for business owners and managers who need full visibility and control over every system operation. Admins are the only users who can see purchase (cost) prices, supplier names, voided transactions, pending remito approvals, stock adjustment logs, and the invoice OCR pipeline. In a typical Ferromax installation, the admin is José Rodríguez — the store owner who monitors daily KPIs, reviews cash flow, and acts on low-stock alerts.
+
+## Default Credentials
+
+The `DataInitializer` seeds the following admin account on first boot if no users exist in the database:
+
+| Field | Value |
+|---|---|
+| Email | `jose@ferromax.com` |
+| Password | `admin123` |
+| Role | `ADMIN` |
+
+<Warning>
+  Change the default admin password immediately in any production or staging environment. The seed credentials are public knowledge and present a critical security risk if left unchanged.
+</Warning>
+
+## Accessible Modules
+
+<CardGroup cols={2}>
+  <Card title="Dashboard" icon="chart-line">
+    Real-time KPI summary (`/dashboard/resumen`), sales-per-day chart for the last 7 days (`/dashboard/ventas-semana`), and the 10 most recent transactions (`/dashboard/transacciones`). The first page an admin sees after login.
+  </Card>
+  <Card title="Products — Full CRUD" icon="boxes-stacked">
+    Full product list including `precioCompra` (purchase/cost price) and `nombreProveedor`. Create, update, and deactivate products via `POST /productos`, `PUT /productos/{id}`, and `DELETE /productos/{id}`.
+  </Card>
+  <Card title="Sales — Full History & Void" icon="receipt">
+    View all sales across all cashiers for any date range via `GET /ventas?desde=&hasta=`. Void any transaction with `PUT /ventas/{id}/anular`. Employees only see their own daily sales.
+  </Card>
+  <Card title="Stock Management" icon="warehouse">
+    Post manual stock corrections via `POST /ajustes-stock` (e.g., shrinkage, inventory count discrepancies). View full adjustment history via `GET /ajustes-stock`. Review and approve supplier remitos via `GET /recepciones-remito/pendientes` and `PATCH /recepciones-remito/{id}/confirmar`.
+  </Card>
+  <Card title="Invoice Scanning (OCR)" icon="file-invoice">
+    Upload a supplier invoice image or PDF via `POST /facturas/analizar` (multipart). The OCR service extracts line items; the admin reviews and confirms the stock ingestion via `POST /facturas/confirmar`. Historical invoice records are paginated at `GET /facturas`.
+  </Card>
+  <Card title="Stock Alerts" icon="bell">
+    `GET /alertas` returns all unread low-stock alerts; `GET /alertas/todas` shows the last 30 days. Mark individual alerts read with `PUT /alertas/{id}/leer` or clear all at once with `PUT /alertas/leer-todas`.
+  </Card>
+</CardGroup>
+
+## Admin-Only API Endpoints
+
+The table below lists every endpoint that requires the `ADMIN` role, sourced directly from `SecurityConfig.java`, `DashboardController.java`, `ProductoController.java`, `VentaController.java`, `AjusteStockController.java`, `FacturaController.java`, `AlertaController.java`, and `RecepcionRemitoController.java`.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/dashboard/resumen` | KPI summary (total sales today, stock alerts, cash flow) |
+| `GET` | `/dashboard/ventas-semana` | Daily sales totals for the last 7 days |
+| `GET` | `/dashboard/transacciones` | Last 10 transactions across all cashiers |
+| `GET` | `/productos` | Full product list including cost price and supplier |
+| `GET` | `/productos/{id}` | Product detail by ID (includes cost price) |
+| `GET` | `/productos/sku/{sku}` | Product lookup by SKU (includes cost price) |
+| `GET` | `/productos/barcode/{codigo}` | Product lookup by barcode (includes cost price) |
+| `GET` | `/productos/stock-critico` | Products below minimum stock threshold |
+| `POST` | `/productos` | Create a new product |
+| `PUT` | `/productos/{id}` | Update an existing product |
+| `DELETE` | `/productos/{id}` | Deactivate a product (soft delete) |
+| `GET` | `/ventas` | All sales with optional `?desde=&hasta=` date filter |
+| `PUT` | `/ventas/{id}/anular` | Void a sale |
+| `POST` | `/ajustes-stock` | Post a manual stock adjustment |
+| `GET` | `/ajustes-stock` | Paginated stock adjustment history |
+| `POST` | `/facturas/analizar` | Upload invoice image/PDF for OCR analysis |
+| `POST` | `/facturas/confirmar` | Confirm and commit OCR-extracted stock ingestion |
+| `GET` | `/facturas` | Paginated list of processed invoices |
+| `GET` | `/alertas` | Unread low-stock alerts |
+| `GET` | `/alertas/todas` | All alerts from the last 30 days |
+| `PUT` | `/alertas/{id}/leer` | Mark a single alert as read |
+| `PUT` | `/alertas/leer-todas` | Mark all alerts as read |
+| `GET` | `/recepciones-remito/pendientes` | Remitos awaiting admin approval |
+| `GET` | `/recepciones-remito` | All remito receipts |
+| `PATCH` | `/recepciones-remito/{id}/confirmar` | Approve or reject a remito |
+| `GET` | `/proveedores/**` | Full supplier management (GET list is also visible to EMPLEADO) |
+
+<Info>
+  Endpoints shared with EMPLEADO (e.g., `POST /ventas`, `POST /recepcion`, `POST /recepciones-remito`, `GET /recepciones-remito/mis-recepciones`, `GET /recepciones-remito/{id}`) are accessible to ADMIN as well. See the [Empleado](/roles/empleado) page for the full shared-access list.
+</Info>
+
+## Frontend Routes (Admin)
+
+The React application (`App.jsx`) guards admin-only pages with `<ProtectedRoute requiereAdmin>`:
+
+| Route | Component | Description |
+|---|---|---|
+| `/` | `DashboardPage` | KPI dashboard — default landing page for admin |
+| `/remitos` | `RemitosPage` | Pending remito list and approval flow |
+| `/ajuste-stock` | `AjusteStockPage` | Manual stock adjustment form and history |
+| `/ingreso-factura` | `IngresoFacturaPage` | Invoice OCR upload and confirmation |
+
+## What Admins Cannot Do
+
+<Note>
+  Despite their broad permissions, there are two things the ADMIN role cannot do through the API:
+
+  1. **Self-register.** The `POST /auth/register` endpoint always assigns `CLIENTE`. Admin accounts must be created via `DataInitializer` on first boot or through a direct database insert (`UPDATE usuario SET rol = 'ADMIN' WHERE email = '...'`).
+  2. **Change another user's role via the API.** There is no `PUT /usuarios/{id}/rol` endpoint in the current version. Role changes require direct database access.
+</Note>

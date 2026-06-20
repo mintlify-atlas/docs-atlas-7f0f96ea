@@ -1,0 +1,71 @@
+---
+title: "Ferromax ERP: Integrated Hardware Store Management"
+sidebarTitle: "Introduction"
+description: "Ferromax ERP provides hardware stores with a POS terminal, inventory management, supplier invoice OCR, and a public e-commerce storefront in one platform."
+---
+
+Ferromax ERP is a full-stack management platform built for Argentine hardware stores (ferreterías). It delivers two tightly integrated surfaces from a single codebase: an **internal ERP** where administrators and employees manage stock, process in-store sales, receive supplier shipments, and monitor dashboard KPIs; and a **public Tienda storefront** where retail customers browse the product catalogue, check live stock availability, and place online orders. Both surfaces share the same Spring Boot backend and PostgreSQL database, ensuring data is always consistent across every interaction.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="POS Terminal" icon="cash-register">
+    Keyboard-driven point-of-sale terminal optimised for speed. Supports barcode scanner input, real-time stock validation, and instant receipt generation for in-store transactions.
+  </Card>
+  <Card title="Inventory Management" icon="boxes-stacked">
+    Full product catalogue with SKU and barcode lookup, category management, manual stock adjustments, and low-stock alerts that fire automatically when a product falls below its configured threshold.
+  </Card>
+  <Card title="Supplier Invoice OCR" icon="file-invoice">
+    Upload a scanned PDF or image of a supplier invoice and let Apache PDFBox + Tess4J extract line items automatically. Parsed data pre-populates the stock reception form, eliminating manual data entry.
+  </Card>
+  <Card title="Real-time Stock Alerts" icon="bell">
+    WebSocket STOMP broadcasts push stock-change events to every connected admin session the moment a sale or adjustment is processed — no polling required.
+  </Card>
+  <Card title="E-commerce Storefront" icon="store">
+    Mobile-first public Tienda with category browsing, product search, and a checkout flow. Customers can register, log in, and track their order history from a dedicated account area.
+  </Card>
+  <Card title="Role-based Access Control" icon="shield-halved">
+    Three distinct roles — Administrador, Empleado, and Cliente — each scoped to a precise set of API endpoints and UI routes. Spring Security enforces access at the method level via `@PreAuthorize`.
+  </Card>
+</CardGroup>
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| **Backend** | Java 17, Spring Boot 3.2.5, PostgreSQL 16, JPA/Hibernate |
+| **Frontend** | React 19, Vite 8, TailwindCSS 4, Framer Motion 12, Recharts 3 |
+| **Security** | JWT via JJWT 0.12.6, Spring Security 6 |
+| **Real-time** | WebSocket STOMP, SockJS |
+| **OCR** | Apache PDFBox 3.0.2, Tess4J 5.11.0 |
+| **Caching** | Caffeine (500 entries, 10 min TTL) |
+
+## Default Users
+
+The database initializer seeds two users on first startup so you can explore both roles immediately.
+
+| Email | Password | Role |
+|---|---|---|
+| jose@ferromax.com | admin123 | Administrador |
+| manuel@ferromax.com | emp123 | Empleado |
+
+<Note>
+  Change these credentials before deploying to any environment accessible outside your local machine. Passwords are stored as BCrypt hashes.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Clone the repository and have both the backend and frontend running locally in under 10 minutes.
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/architecture">
+    Understand how the Spring Boot backend, React SPA, PostgreSQL database, and WebSocket layer fit together.
+  </Card>
+  <Card title="Roles & Permissions" icon="users" href="/roles/overview">
+    Detailed breakdown of what each role can see and do across the API and the UI.
+  </Card>
+  <Card title="API Overview" icon="code" href="/api/overview">
+    Explore the full REST API — authentication, products, sales, stock, and more — including the Swagger UI location.
+  </Card>
+</CardGroup>

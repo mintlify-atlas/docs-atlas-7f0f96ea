@@ -1,0 +1,316 @@
+---
+title: "Dashboard API: KPIs, Sales Charts, and Stock Alerts"
+sidebarTitle: "Dashboard"
+description: "Admin-only REST endpoints for the Ferromax ERP dashboard: business KPI summary, 7-day sales chart data, recent transactions, and stock alert management."
+---
+
+The Dashboard API provides aggregated business metrics and stock alert management for the Ferromax ERP back-office. Every endpoint in this group is restricted to the `ADMIN` role — requests authenticated with an `EMPLEADO` or `CLIENTE` token will receive `403 Forbidden`. All dates and timestamps are serialized in ISO 8601 format using the `America/Argentina/Buenos_Aires` timezone.
+
+---
+
+## KPI Summary
+
+### GET /api/dashboard/resumen
+
+Returns a snapshot of the key business indicators computed for the current calendar day (midnight → midnight, Argentine time).
+
+**Authentication:** Bearer JWT — `ADMIN` role required.
+
+<ResponseField name="ventasHoy" type="number (BigDecimal)">
+  Total revenue from completed sales today, in ARS.
+</ResponseField>
+
+<ResponseField name="cantidadVentasHoy" type="integer">
+  Number of completed sale transactions processed today.
+</ResponseField>
+
+<ResponseField name="productosStockCritico" type="integer">
+  Count of active products whose current stock is at or below their configured minimum threshold.
+</ResponseField>
+
+<ResponseField name="pedidosPendientes" type="integer">
+  Number of customer orders currently in `PENDIENTE` or `CONFIRMADO` state.
+</ResponseField>
+
+<ResponseField name="saldoCaja" type="number (BigDecimal)">
+  Cash-only revenue for today — sum of completed sales paid with `EFECTIVO`.
+</ResponseField>
+
+```bash
+curl -X GET http://localhost:8081/api/dashboard/resumen \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+```json
+{
+  "ventasHoy": 154320.50,
+  "cantidadVentasHoy": 23,
+  "productosStockCritico": 4,
+  "pedidosPendientes": 7,
+  "saldoCaja": 89200.00
+}
+```
+
+---
+
+## 7-Day Sales Chart
+
+### GET /api/dashboard/ventas-semana
+
+Returns daily sales totals for the last 7 days, ordered from oldest to most recent (day −6 → today). Each entry represents one full calendar day in Argentine time. Days with no completed sales return `null` for `total`.
+
+**Authentication:** Bearer JWT — `ADMIN` role required.
+
+<ResponseField name="[]" type="array of VentaDiariaDTO">
+  Ordered array of 7 objects, one per day.
+</ResponseField>
+
+<ResponseField name="[].fecha" type="string (LocalDate, ISO 8601)">
+  The calendar date for this entry, e.g. `"2024-06-10"`.
+</ResponseField>
+
+<ResponseField name="[].total" type="number (BigDecimal) | null">
+  Total revenue from completed sales on this date. `null` if no sales were recorded.
+</ResponseField>
+
+```bash
+curl -X GET http://localhost:8081/api/dashboard/ventas-semana \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+```json
+[
+  { "fecha": "2024-06-04", "total": 98400.00 },
+  { "fecha": "2024-06-05", "total": 112750.50 },
+  { "fecha": "2024-06-06", "total": null },
+  { "fecha": "2024-06-07", "total": null },
+  { "fecha": "2024-06-08", "total": 203100.75 },
+  { "fecha": "2024-06-09", "total": 177600.00 },
+  { "fecha": "2024-06-10", "total": 154320.50 }
+]
+```
+
+<Note>
+  Weekends with no activity return `null` for `total` rather than `0`. Chart components should treat `null` as zero when rendering.
+</Note>
+
+---
+
+## Recent Transactions
+
+### GET /api/dashboard/transacciones
+
+Returns the 10 most recent sale records, regardless of status, ordered by date descending. Used to populate the "Últimas Transacciones" table on the dashboard home page.
+
+**Authentication:** Bearer JWT — `ADMIN` role required.
+
+<ResponseField name="[]" type="array of VentaResponse">
+  Array of up to 10 sale records.
+</ResponseField>
+
+<ResponseField name="[].id" type="integer (Long)">
+  Unique sale identifier.
+</ResponseField>
+
+<ResponseField name="[].fecha" type="string (OffsetDateTime, ISO 8601)">
+  Timestamp when the sale was created, including UTC offset, e.g. `"2024-06-10T14:23:05-03:00"`.
+</ResponseField>
+
+<ResponseField name="[].total" type="number (BigDecimal)">
+  Total monetary value of the sale.
+</ResponseField>
+
+<ResponseField name="[].estado" type="string">
+  Sale status. One of: `COMPLETADA`, `ANULADA`, `PENDIENTE`.
+</ResponseField>
+
+<ResponseField name="[].medioPago" type="string">
+  Payment method. One of: `EFECTIVO`, `TRANSFERENCIA`, `TARJETA_DEBITO`, `TARJETA_CREDITO`, `CUENTA_CORRIENTE`.
+</ResponseField>
+
+<ResponseField name="[].nombreCajero" type="string">
+  Full name (`nombre + apellido`) of the employee who processed the sale.
+</ResponseField>
+
+<ResponseField name="[].cantidadItems" type="integer">
+  Number of distinct line items in the sale.
+</ResponseField>
+
+<ResponseField name="[].origen" type="string">
+  Sale origin channel. One of: `POS`, `PEDIDO`. Defaults to `"POS"` when origin is not recorded.
+</ResponseField>
+
+```bash
+curl -X GET http://localhost:8081/api/dashboard/transacciones \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+```json
+[
+  {
+    "id": 1042,
+    "fecha": "2024-06-10T14:23:05-03:00",
+    "total": 8750.00,
+    "estado": "COMPLETADA",
+    "medioPago": "EFECTIVO",
+    "nombreCajero": "Laura Gómez",
+    "cantidadItems": 3,
+    "origen": "POS"
+  },
+  {
+    "id": 1041,
+    "fecha": "2024-06-10T13:55:30-03:00",
+    "total": 23400.50,
+    "estado": "COMPLETADA",
+    "medioPago": "TRANSFERENCIA",
+    "nombreCajero": "Carlos Ferreyra",
+    "cantidadItems": 7,
+    "origen": "PEDIDO"
+  }
+]
+```
+
+---
+
+## Stock Alerts
+
+Stock alerts are generated automatically when a product's `stockActual` falls to or below its `stockMinimo`. The following endpoints allow admins to monitor and dismiss these alerts.
+
+### GET /api/alertas
+
+Returns all **unread** stock alerts. This is the count reflected in the badge on the dashboard sidebar.
+
+**Authentication:** Bearer JWT — `ADMIN` role required.
+
+<ResponseField name="[]" type="array of AlertaStockDTO">
+  Array of unread alert objects. Empty array `[]` if no unread alerts exist.
+</ResponseField>
+
+<ResponseField name="[].id" type="integer (Long)">
+  Unique alert identifier.
+</ResponseField>
+
+<ResponseField name="[].nombreProducto" type="string">
+  Display name of the product that triggered the alert.
+</ResponseField>
+
+<ResponseField name="[].stockActual" type="integer">
+  The product's stock level at the time the alert was generated.
+</ResponseField>
+
+<ResponseField name="[].stockMinimo" type="integer">
+  The configured minimum stock threshold for this product.
+</ResponseField>
+
+<ResponseField name="[].tipoAlerta" type="string">
+  Alert severity. `"SIN_STOCK"` when `stockActual` is 0; `"STOCK_BAJO"` otherwise.
+</ResponseField>
+
+<ResponseField name="[].fechaGeneracion" type="string (OffsetDateTime, ISO 8601)">
+  Timestamp when the alert was created.
+</ResponseField>
+
+<ResponseField name="[].lida" type="boolean">
+  `false` for all results returned by this endpoint (by definition, only unread alerts are returned).
+</ResponseField>
+
+```bash
+curl -X GET http://localhost:8081/api/alertas \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+```json
+[
+  {
+    "id": 87,
+    "nombreProducto": "Taladro Bosch 500W",
+    "stockActual": 0,
+    "stockMinimo": 3,
+    "tipoAlerta": "SIN_STOCK",
+    "fechaGeneracion": "2024-06-10T11:42:00-03:00",
+    "lida": false
+  },
+  {
+    "id": 91,
+    "nombreProducto": "Amoladora Dewalt 750W",
+    "stockActual": 2,
+    "stockMinimo": 5,
+    "tipoAlerta": "STOCK_BAJO",
+    "fechaGeneracion": "2024-06-10T14:05:22-03:00",
+    "lida": false
+  }
+]
+```
+
+---
+
+### GET /api/alertas/todas
+
+Returns **all** stock alerts created within the last 30 days, both read and unread. Used by the alert history panel.
+
+**Authentication:** Bearer JWT — `ADMIN` role required.
+
+Response shape is identical to `GET /api/alertas`. The `lida` field will be `true` for previously dismissed alerts.
+
+```bash
+curl -X GET http://localhost:8081/api/alertas/todas \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+---
+
+### PUT /api/alertas/{id}/leer
+
+Marks a single stock alert as read. The frontend `AlertaStockPanel` calls this when the admin clicks the checkmark button on an individual alert card.
+
+**Authentication:** Bearer JWT — `ADMIN` role required.
+
+<ParamField path="id" type="integer (Long)" required>
+  The numeric ID of the alert to mark as read.
+</ParamField>
+
+Returns the updated `AlertaStockDTO` with `lida: true`.
+
+```bash
+curl -X PUT http://localhost:8081/api/alertas/87/leer \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+```json
+{
+  "id": 87,
+  "nombreProducto": "Taladro Bosch 500W",
+  "stockActual": 0,
+  "stockMinimo": 3,
+  "tipoAlerta": "SIN_STOCK",
+  "fechaGeneracion": "2024-06-10T11:42:00-03:00",
+  "lida": true
+}
+```
+
+<Warning>
+  Returns `404 Not Found` if the given `id` does not correspond to an existing alert.
+</Warning>
+
+---
+
+### PUT /api/alertas/leer-todas
+
+Marks **all** currently unread alerts as read in a single operation. Returns a count of how many alerts were updated.
+
+**Authentication:** Bearer JWT — `ADMIN` role required.
+
+<ResponseField name="marcadas" type="integer">
+  The number of alerts that were transitioned from unread to read. `0` if there were no unread alerts.
+</ResponseField>
+
+```bash
+curl -X PUT http://localhost:8081/api/alertas/leer-todas \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+```json
+{
+  "marcadas": 5
+}
+```

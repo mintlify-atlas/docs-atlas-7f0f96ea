@@ -1,0 +1,112 @@
+---
+title: "Tienda: Public E-Commerce Storefront"
+sidebarTitle: "Storefront"
+description: "Ferromax's public Tienda lets customers browse hardware products by category, add items to a cart, register or log in, and place online orders tracked in the ERP."
+---
+
+The Tienda is the consumer-facing e-commerce surface of Ferromax ERP, accessible at `/tienda`. It shares the same product catalog and inventory as the internal ERP, so stock shown to customers is always accurate. The storefront is built as a separate page context within the same React app — it has its own navbar, hero section, and checkout flow, completely decoupled from the admin/employee sidebar layout.
+
+## Customer Journey
+
+<Steps>
+  <Step title="Land on the Tienda home page">
+    Customers arrive at `/tienda`, which renders the full marketing home page: a parallax hero video, a stats bar, a scrolling marquee, featured categories, weekly deals, testimonials, and a contact footer. No authentication is required to browse.
+  </Step>
+  <Step title="Browse the public catalog">
+    The full product listing is available at `/catalogo`. Products are loaded from:
+
+    ```
+    GET /api/productos/publico
+    ```
+
+    This endpoint requires no authentication and returns `ProductoPublicoDTO` objects — the cost price (`precioCompra`) and supplier information are deliberately excluded from this response to protect business data.
+
+    Customers can filter by category using the sidebar (desktop) or horizontal pill chips (mobile). Categories are grouped into seven themed sections: Herramientas Eléctricas, Herramientas Manuales, Potencia y Fuerza, Construcción, Plomería y Agua, Jardín y Exterior, and Seguridad y Hogar. A deep-link to a specific category is available at `/catalogo/:categoria`.
+  </Step>
+  <Step title="Add items to the cart">
+    Each `ProductoCard` has an **Agregar** button. Items are held in client-side React state (`useState`) — no server round-trip is required until checkout. The cart state is managed in `TiendaPage.jsx` and passed down to `CarritoDrawer` and the individual product cards. A spring-animated `CarritoDrawer` slides in from the right; a badge on the cart icon in the navbar shows the running item count with a spring bounce animation.
+  </Step>
+  <Step title="Log in or register">
+    If the customer clicks **Pagar** without being authenticated, they are redirected to `/tienda/login`. New accounts are created via:
+
+    ```
+    POST /auth/register
+    ```
+
+    Returning customers authenticate via:
+
+    ```
+    POST /auth/login
+    ```
+
+    Both endpoints return a JWT that is stored in `AuthContext`. After login the customer is returned to the cart to complete checkout.
+  </Step>
+  <Step title="Place the order">
+    From the `CarritoDrawer` the customer clicks **Pagar**. The frontend calls `pedidoService.crear(carrito)`, which internally posts to:
+
+    ```
+    POST /api/ventas
+    Authorization: Bearer <jwt>
+    Content-Type: application/json
+    ```
+
+    Because the JWT role is `CLIENTE`, the backend automatically assigns `origen = OrigenVentaEnum.WEB`. The cart is cleared and the customer is navigated to `/tienda/confirmacion`.
+  </Step>
+  <Step title="View the order confirmation">
+    The `/tienda/confirmacion` page shows a success state. From here the customer can navigate to their order history.
+  </Step>
+  <Step title="Track orders">
+    Past purchases are listed at `/tienda/mis-pedidos`, fetched from:
+
+    ```
+    GET /api/ventas/mis-compras
+    Authorization: Bearer <jwt>  (CLIENTE only)
+    ```
+
+    The backend extracts the customer's ID from the JWT and returns only their own `VentaResponse` records.
+  </Step>
+</Steps>
+
+## Public Catalog API
+
+The storefront uses two public endpoints that do not require authentication:
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/productos/publico` | Returns all active products as `ProductoPublicoDTO` (no cost price, no supplier data) |
+| `GET /api/categorias` | Returns the full nested category tree |
+
+Product images are served as static assets (see the Note below). All price formatting on the frontend uses the Argentine locale (`es-AR`, ARS currency).
+
+## Featured Content
+
+The Tienda home page (`/tienda`) includes four marketing components rendered between the hero and the footer:
+
+<CardGroup cols={2}>
+  <Card title="CarruselDestacados" icon="star">
+    A horizontally scrolling carousel of featured or promoted products. Items are marked as featured in the admin product configuration.
+  </Card>
+  <Card title="CategoriasDestacadas" icon="grid-2x2">
+    A visual grid of category quick links rendered by `CategoriasDestacadas.jsx`. Each tile shows a category icon and name and navigates to `/catalogo/:categoria`.
+  </Card>
+  <Card title="OfertasSemanales" icon="tag">
+    A section of discounted or highlighted products for the current week, rendered by `OfertasSemanales.jsx`. Products in this section can be added to the cart directly from the home page.
+  </Card>
+  <Card title="Testimonios" icon="message-circle">
+    Customer review cards rendered by `Testimonios.jsx`, shown above the footer to build social proof.
+  </Card>
+</CardGroup>
+
+## Mobile Experience
+
+The Tienda is designed mobile-first. Key responsive behaviours:
+
+- The navbar collapses to a hamburger menu on screens narrower than `md` (768 px). The mobile menu overlays the full screen with large touch-friendly links.
+- The product grid uses `grid-cols-2` on small screens, stepping up to `grid-cols-3` on `lg`.
+- Category filtering uses horizontally scrollable pill chips below `lg` instead of the sidebar.
+- The `CarritoDrawer` is a full-height side panel with spring animation (`framer-motion`), sized appropriately for thumb reach.
+- The expandable search bar drops in below the navbar with an animated height transition, autofocusing the input.
+
+<Note>
+Product images are served from `/img/{filename}` on the backend's static resource path. Ensure the `img/` directory under the Spring Boot `resources/static/` folder is populated with product image files before opening the storefront to customers. Missing images will result in broken image placeholders in `ProductoCard`.
+</Note>

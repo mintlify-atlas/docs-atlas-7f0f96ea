@@ -1,0 +1,134 @@
+---
+title: "Ferromax ERP System Architecture"
+sidebarTitle: "Architecture"
+description: "How Ferromax ERP is structured: Spring Boot API backend, React SPA frontend, PostgreSQL database, JWT authentication, and WebSocket real-time layer."
+---
+
+Ferromax ERP is a two-tier web application. The **Java backend** — a Spring Boot 3.2.5 application packaged as a single executable JAR — exposes a RESTful HTTP API and a WebSocket endpoint. The **React frontend** — a Vite-bundled single-page application — communicates exclusively through those two interfaces: HTTP via Axios for standard CRUD operations, and WebSocket STOMP for real-time push notifications. All persistent state lives in a PostgreSQL 16 database accessed through JPA/Hibernate. The two processes run independently, so they can be deployed together on a single machine during development or separated behind a reverse proxy in production.
+
+## Project Layout
+
+```
+ferromax_v0.8/
+├── src/main/java/com/ferromax/erp/   # Spring Boot backend
+│   ├── controller/                    # REST controllers
+│   ├── service/                       # Business logic
+│   ├── repository/                    # JPA repositories
+│   ├── model/                         # JPA entities
+│   ├── dto/                           # Request/Response DTOs
+│   ├── security/                      # JWT filter, Spring Security config
+│   └── config/                        # WebSocket, CORS, data init
+├── ferromax-web/                      # React + Vite frontend
+│   └── src/
+│       ├── pages/                     # Route-level page components
+│       ├── components/                # Reusable UI components
+│       ├── services/                  # Axios API service modules
+│       └── context/                   # AuthContext (JWT state)
+├── scripts/                           # Python data import utilities
+└── data/                              # Product catalog XLSX
+```
+
+## Backend Layer
+
+The backend follows the standard Spring Boot MVC layering pattern, with each layer having a single responsibility.
+
+| Layer | Package | Responsibility |
+|---|---|---|
+| **Controller** | `controller/` | Receives HTTP requests, validates input with `@Valid`, delegates to the service layer, and maps the result to an HTTP response code. |
+| **Service** | `service/` | Contains all business logic — stock calculations, sale totalling, invoice parsing, alert triggering. Also owns `@Transactional` boundaries. |
+| **Repository** | `repository/` | Spring Data JPA interfaces. Each entity has a corresponding repository; complex queries use JPQL `@Query` annotations. |
+| **Model** | `model/` | JPA `@Entity` classes mapped to PostgreSQL tables. Lombok `@Data` / `@Builder` reduce boilerplate. |
+| **DTO** | `dto/` | Separate request and response objects built with MapStruct mappers, keeping the entity model out of the API surface. |
+
+The server listens on **port 8081** with a context path of **`/api`**, so every endpoint is reachable at `http://localhost:8081/api/<resource>`. SpringDoc is bundled and exposes an interactive Swagger UI at `http://localhost:8081/api/swagger-ui.html`.
+
+## Frontend Layer
+
+The React SPA is a Vite project under `ferromax-web/`. Routing is handled by **react-router-dom v7**, with routes declared in `App.jsx`. There are three route categories:
+
+- **Public routes** — `/tienda`, `/tienda/login`, `/catalogo`, and `/catalogo/:categoria` are accessible without a token.
+- **Employee routes** — wrapped in `<ProtectedRoute requiereEmpleado>`, accessible to both ADMIN and EMPLEADO roles. Includes `/pos`, `/productos`, `/ventas`, and `/recepcion`.
+- **Admin-only routes** — wrapped in `<ProtectedRoute requiereAdmin>`, restricted to ADMIN. Includes `/` (dashboard), `/remitos`, `/ajuste-stock`, and `/ingreso-factura`.
+
+All HTTP calls go through Axios service modules in `src/services/`. A shared Axios instance attaches the JWT from `AuthContext` as an `Authorization: Bearer <token>` header on every outbound request. UI styling uses **TailwindCSS 4**, transitions and page-level animations use **Framer Motion**, and dashboard charts are rendered with **Recharts**.
+
+## Authentication Flow
+
+Ferromax uses stateless JWT authentication. The sequence below covers a complete login-to-protected-request cycle.
+
+<Steps>
+  <Step title="User submits credentials">
+    The frontend `POST`s `{ email, password }` to `/api/auth/login`. Spring Security's `DaoAuthenticationProvider` verifies the credentials against the BCrypt-hashed password in the database.
+  </Step>
+  <Step title="Server issues a JWT">
+    On success, `AuthController` calls `JwtService` to sign a token containing the user's email and role. The response body includes `token`, `rol`, `nombre`, and `mensaje`.
+  </Step>
+  <Step title="Client stores the token">
+    `AuthContext` stores the token in React state (and optionally in `localStorage` for session persistence). All subsequent Axios requests include the header `Authorization: Bearer <token>`.
+  </Step>
+  <Step title="Filter validates each request">
+    `JwtAuthenticationFilter` intercepts every incoming request, extracts the token from the `Authorization` header, validates the signature and expiry via `JwtService`, and loads the `UserDetails` from the database. If valid, it populates the Spring Security `SecurityContextHolder` for the duration of the request.
+  </Step>
+  <Step title="Role check enforces access">
+    `SecurityConfig` defines URL-level rules (e.g., `GET /dashboard/**` requires `ROLE_ADMIN`). Individual controller methods may also carry `@PreAuthorize` annotations for fine-grained method-level enforcement, enabled by `@EnableMethodSecurity`.
+  </Step>
+</Steps>
+
+<Note>
+  JWTs expire after **8 hours** (`jwt.expiration=28800000 ms`). A refresh token mechanism is configured with a 7-day TTL. Clients should handle `401 Unauthorized` responses by redirecting the user back to the login page.
+</Note>
+
+## Real-time Updates
+
+Stock changes need to reach every open admin session instantly — polling is too slow for a busy POS environment. Ferromax solves this with a Spring WebSocket STOMP message broker.
+
+| Property | Value |
+|---|---|
+| **STOMP endpoint** | `/api/ws` |
+| **SockJS fallback** | Enabled (transparent HTTP long-polling for environments that block WebSockets) |
+| **Topic prefix** | `/topic` |
+| **App destination prefix** | `/app` |
+| **Stock update topic** | `/topic/stock-update` |
+
+When a sale is completed or a manual stock adjustment is saved, the relevant service bean injects `SimpMessagingTemplate` and calls `convertAndSend("/topic/stock-update", payload)`. Every frontend client subscribed to that topic receives the message within milliseconds and updates its local state — no page refresh needed.
+
+The frontend uses `@stomp/stompjs` and `sockjs-client` to establish the connection. The connection is initialised in a React `useEffect` hook and torn down on component unmount to prevent memory leaks.
+
+## Database
+
+| Setting | Value |
+|---|---|
+| **Engine** | PostgreSQL 16 |
+| **Schema management** | JPA/Hibernate `ddl-auto=update` |
+| **Connection pool** | HikariCP — max 10 connections, min idle 2 |
+| **Pool name** | `FerromaxHikariPool` |
+| **Timezone** | `America/Argentina/Buenos_Aires` (applied at JVM and JDBC levels) |
+| **Cache** | Caffeine — max 500 entries, 10 min write-expiry (`expireAfterWrite=600s`) |
+
+`ddl-auto=update` means Hibernate adds missing columns and creates new tables on startup but never drops existing ones. This is safe for development and low-traffic production deployments. For production migrations at scale, replace it with a dedicated tool such as Flyway or Liquibase.
+
+## Security Model
+
+Ferromax defines three roles. Spring Security stores them with the `ROLE_` prefix internally, but the application code and API refer to them as `ADMIN`, `EMPLEADO`, and `CLIENTE`.
+
+| Role | Intended user | Key permissions |
+|---|---|---|
+| `ADMIN` | Business owner / manager | Full access: dashboard, all products (including `precioCompra`), all sales history, stock adjustments, remitos, invoice OCR, alert management, supplier CRUD |
+| `EMPLEADO` | In-store staff | POS terminal, product lookup (price and stock only — no `precioCompra`), stock reception, own daily sales |
+| `CLIENTE` | Online shopper | Public catalogue browsing, place orders via `/pedidos`, view own order history via `/ventas/mis-compras` |
+
+**Publicly accessible endpoints** (no token required):
+
+```
+GET  /api/productos/publico
+GET  /api/categorias/**
+POST /api/auth/login
+POST /api/auth/register
+GET  /api/img/**
+```
+
+All other endpoints require a valid JWT. Sessions are fully **stateless** — `SessionCreationPolicy.STATELESS` is set in `SecurityConfig`, so the server holds no session state between requests.
+
+<Warning>
+  CORS is currently configured to allow origins `localhost:5173` through `localhost:5175` only. Before deploying to a staging or production environment, update the `allowedOrigins` list in `SecurityConfig.corsConfigurationSource()` to match your actual domain.
+</Warning>

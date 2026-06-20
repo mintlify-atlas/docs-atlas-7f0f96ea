@@ -1,0 +1,148 @@
+---
+title: "Ferromax ERP REST API Reference"
+sidebarTitle: "Overview"
+description: "The Ferromax ERP REST API exposes endpoints for products, sales, inventory, dashboard, catalog, and real-time WebSocket events. Base URL: http://localhost:8081/api."
+---
+
+The Ferromax ERP API is a RESTful HTTP API built with Spring Boot 3.2.5 on Java 17. It serves both the internal ERP frontend and the public storefront, with endpoints grouped by resource and protected by role-based JWT authorization. All responses are JSON; every protected route requires a valid Bearer token issued by `POST /auth/login`.
+
+## Base URL
+
+All endpoints are served under a single base URL. During development the server runs on port `8081` with the `/api` context path configured in `application.properties`.
+
+```text
+http://localhost:8081/api
+```
+
+You can verify the server is up by hitting the health actuator endpoint — no authentication required:
+
+```bash
+curl http://localhost:8081/api/actuator/health
+```
+
+```json
+{
+  "status": "UP"
+}
+```
+
+## Authentication
+
+Most endpoints require a JWT Bearer token. Obtain one by posting credentials to [`POST /auth/login`](/api/authentication#post-authlogin), then include it in every subsequent request using the `Authorization` header:
+
+```text
+Authorization: Bearer <token>
+```
+
+See the [Authentication](/api/authentication) page for the full login, register, and current-user flows.
+
+## Response Format
+
+All API responses use `application/json`. The following serialization rules apply globally, as configured via Jackson in `application.properties`:
+
+| Rule | Value |
+|---|---|
+| Date format | ISO 8601 (e.g. `2024-08-15T14:30:00`) |
+| Timezone | `America/Argentina/Buenos_Aires` |
+| Locale | `es_AR` |
+| Null fields | Omitted (`non_null` Jackson setting) |
+
+## HTTP Status Codes
+
+The API uses standard HTTP status codes to indicate the outcome of every request.
+
+| Code | Status | Meaning |
+|---|---|---|
+| `200` | OK | Request succeeded; response body contains the result |
+| `201` | Created | Resource created successfully |
+| `204` | No Content | Request succeeded; no response body |
+| `400` | Bad Request | Validation error or malformed request body |
+| `401` | Unauthorized | Missing or invalid JWT token |
+| `403` | Forbidden | Valid token but insufficient role for this resource |
+| `404` | Not Found | Resource does not exist (`RecursoNoEncontradoException`) |
+| `500` | Internal Server Error | Unhandled server-side error |
+
+## Error Response Format
+
+Error responses follow a consistent JSON shape with two fields: a machine-readable `error` code and a human-readable `mensaje` in Spanish.
+
+```json
+{
+  "error": "UNAUTHORIZED",
+  "mensaje": "Credenciales inválidas"
+}
+```
+
+<Note>
+  Validation errors from `@Valid` bean validation (HTTP `400`) may include additional fields describing which request fields failed and why.
+</Note>
+
+## API Endpoints Index
+
+The API is organized into the following resource groups. All prefixes are relative to the base URL `http://localhost:8081/api`.
+
+| Resource | Prefix | Description |
+|---|---|---|
+| Authentication | `/auth` | Login, register, current user |
+| Products | `/productos` | Product CRUD, barcode/SKU lookup |
+| Sales | `/ventas` | Register sales, view history |
+| Inventory | `/recepcion`, `/recepciones-remito`, `/ajustes-stock` | Goods receipt and stock management |
+| Dashboard | `/dashboard` | KPI metrics and charts (admin only) |
+| Catalog | `/categorias` | Public product catalog by category |
+| Invoices | `/facturas` | OCR invoice scanning and confirmation |
+| Alerts | `/alertas` | Stock alert management (admin only) |
+| WebSocket | `/ws` | Real-time STOMP events |
+
+### Role-based access
+
+Routes are protected at three privilege levels, enforced by Spring Security's `@EnableMethodSecurity` and `SecurityFilterChain`:
+
+- **ADMIN** — full access to all endpoints including dashboard, stock adjustments, and alert management
+- **EMPLEADO** — access to sales creation, product lookups, and goods receipt; read-only access to suppliers
+- **CLIENTE** — access to the public catalog, placing orders, and viewing own purchase history
+
+### Public routes (no token required)
+
+The following routes are open to unauthenticated callers:
+
+- `POST /auth/login`
+- `POST /auth/register`
+- `GET /productos/publico`
+- `GET /categorias/**`
+- `GET /img/**`
+
+## OpenAPI / Swagger UI
+
+Ferromax ERP includes **springdoc-openapi**. The interactive Swagger UI and the machine-readable OpenAPI 3 spec are available while the server is running:
+
+| Resource | URL |
+|---|---|
+| Swagger UI | `http://localhost:8081/api/swagger-ui.html` |
+| OpenAPI JSON spec | `http://localhost:8081/api/v3/api-docs` |
+
+<Tip>
+  The Swagger UI has **Try it out** enabled (`springdoc.swagger-ui.try-it-out-enabled=true`), so you can authenticate and execute live requests directly from the browser without any additional tooling.
+</Tip>
+
+## Explore the API
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/api/authentication">
+    Login, register new accounts, and retrieve the current user profile.
+  </Card>
+  <Card title="Products" icon="barcode" href="/api/productos">
+    Full product CRUD, barcode lookup, and SKU search.
+  </Card>
+  <Card title="Sales" icon="cart-shopping" href="/api/ventas">
+    Register sales transactions and query sales history.
+  </Card>
+  <Card title="Inventory" icon="warehouse" href="/api/inventario">
+    Goods receipt, remito-based receiving, and manual stock adjustments.
+  </Card>
+  <Card title="Dashboard" icon="chart-line" href="/api/dashboard">
+    Admin-only KPI metrics, revenue charts, and stock alerts.
+  </Card>
+  <Card title="Catalog" icon="tag" href="/api/catalogo">
+    Public-facing product catalog browsable by category.
+  </Card>
+</CardGroup>

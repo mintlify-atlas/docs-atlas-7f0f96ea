@@ -1,0 +1,94 @@
+---
+title: "User Roles and Access Control in Ferromax ERP"
+sidebarTitle: "Overview"
+description: "Ferromax ERP enforces three roles — Admin, Empleado, and Cliente — each with distinct API permissions and UI access. Learn how roles are assigned and enforced."
+---
+
+Ferromax ERP enforces role-based access control through Spring Security's `@PreAuthorize` annotations. Three roles are defined in `RolEnum`: **ADMIN**, **EMPLEADO**, and **CLIENTE**. Every protected API request is validated against the role embedded in the caller's JWT token — no session state is stored server-side. Understanding which role can reach which endpoint is the foundation for onboarding new staff, debugging `403 Forbidden` errors, and designing integrations.
+
+## Role Summary
+
+| Role | Default User | Primary Interface | Key Capabilities |
+|---|---|---|---|
+| `ADMIN` | jose@ferromax.com | Dashboard, all modules | Full system access: manage products (incl. cost prices), view all sales, void transactions, approve remitos, adjust stock manually, run invoice OCR |
+| `EMPLEADO` | manuel@ferromax.com | POS terminal, Recepción | Process in-store sales, look up products (no cost price or supplier data), create remito receipts, view own daily sales |
+| `CLIENTE` | *(self-registered)* | Public Tienda storefront | Browse product catalog, place online orders, view own order history |
+
+## How Roles Work
+
+When a user logs in via `POST /auth/login`, the server issues a signed JWT. That token contains three claims: the user's email, their numeric ID, and their role (e.g., `"ADMIN"`). On every subsequent request the `JwtAuthenticationFilter` intercepts the `Authorization: Bearer <token>` header, validates the signature, and loads the role into the Spring Security context.
+
+Individual controller methods are then guarded with `@PreAuthorize`:
+
+```java
+// DashboardController.java — entire controller is ADMIN-only
+@PreAuthorize("hasRole('ADMIN')")
+public class DashboardController { ... }
+
+// VentaController.java — scoped per method
+@PreAuthorize("hasAnyRole('ADMIN','EMPLEADO','CLIENTE')")
+public ResponseEntity<VentaDetalleResponse> registrar(...) { ... }
+
+@PreAuthorize("hasRole('ADMIN')")
+public ResponseEntity<List<VentaResponse>> listar(...) { ... }
+```
+
+Spring Security prefixes role names with `ROLE_` internally, so `hasRole('ADMIN')` matches the `ADMIN` value stored in the token. Method security is enabled globally via `@EnableMethodSecurity` in `SecurityConfig`.
+
+## Role Assignment
+
+<Steps>
+  <Step title="ADMIN and EMPLEADO — seeded at startup">
+    On first boot, `DataInitializer` creates the admin user (`jose@ferromax.com`, role `ADMIN`) and the employee user (`manuel@ferromax.com`, role `EMPLEADO`) if no users exist in the database. In production environments, additional staff accounts must be inserted directly into the database or provisioned through a future admin UI — there is no public API endpoint to create ADMIN or EMPLEADO users.
+  </Step>
+  <Step title="CLIENTE — self-registration via API">
+    Any visitor can call `POST /auth/register` with their name, email, and password. The `AuthController` **always** assigns `RolEnum.CLIENTE` to new registrations — the role cannot be overridden through the request body. This ensures the public registration endpoint can never be abused to create privileged accounts.
+
+    ```java
+    // AuthController.java
+    usuario.setRol(RolEnum.CLIENTE); // hardcoded — no override possible
+    ```
+  </Step>
+</Steps>
+
+## Public Endpoints (No Authentication Required)
+
+The following endpoints are open to all callers — no JWT is needed:
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/auth/login` | Authenticate and receive a JWT |
+| `POST` | `/auth/register` | Create a new CLIENTE account |
+| `GET` | `/productos/publico` | Browse the full public product catalog |
+| `GET` | `/categorias/**` | List all product categories |
+| `GET` | `/img/**` | Serve static product images |
+
+<Note>
+  All other endpoints require a valid `Authorization: Bearer <token>` header. Requests without a token receive `401 Unauthorized`; requests with a valid token but insufficient role receive `403 Forbidden`.
+</Note>
+
+## Explore Each Role
+
+<CardGroup cols={3}>
+  <Card
+    title="Admin"
+    icon="shield-halved"
+    href="/roles/admin"
+  >
+    Full system access — dashboard KPIs, product management, sales history, stock adjustments, remito approvals, and invoice OCR.
+  </Card>
+  <Card
+    title="Empleado"
+    icon="cash-register"
+    href="/roles/empleado"
+  >
+    POS terminal, product lookup (without cost prices), goods receipt, and remito creation for store floor staff.
+  </Card>
+  <Card
+    title="Cliente"
+    icon="bag-shopping"
+    href="/roles/cliente"
+  >
+    Self-registered users who browse the public Tienda storefront and place online orders.
+  </Card>
+</CardGroup>

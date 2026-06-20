@@ -1,0 +1,89 @@
+---
+title: "Empleado Role: POS and Stock Operations"
+sidebarTitle: "Empleado"
+description: "The Empleado role gives store employees access to the POS terminal, product lookup (without cost prices), goods receipt, and remito creation in Ferromax ERP."
+---
+
+The `EMPLEADO` role is designed for store floor staff. Employees process in-store sales via the POS terminal, receive merchandise arriving from suppliers, and create delivery note (remito) receipts — all without ever seeing sensitive cost pricing or supplier data. Speed is the top priority in the employee workflow: the POS terminal is optimized for barcode-scanner-driven checkout, and every endpoint an employee uses is scoped to only the data their job requires.
+
+## Default Credentials
+
+The `DataInitializer` seeds the following employee account on first boot if no users exist in the database:
+
+| Field | Value |
+|---|---|
+| Email | `manuel@ferromax.com` |
+| Password | `empleado123` |
+| Role | `EMPLEADO` |
+
+<Warning>
+  Change the default employee password before deploying to production. These credentials are seeded publicly and should be treated as temporary.
+</Warning>
+
+## Accessible Modules
+
+<CardGroup cols={2}>
+  <Card title="POS Terminal" icon="cash-register">
+    The primary employee interface at `/pos`. Processes in-store sales by scanning barcodes or entering SKUs. Each completed sale is recorded with `OrigenVentaEnum.POS` and linked to the employee's user ID as the cashier.
+  </Card>
+  <Card title="Product Lookup (No Cost Price)" icon="magnifying-glass">
+    Employees query products through the `/productos/empleado/**` endpoints, which return `ProductoEmpleadoDTO` — a filtered DTO that deliberately omits `precioCompra` (purchase price) and `nombreProveedor` (supplier name). Supports lookup by full list, SKU, and barcode.
+  </Card>
+  <Card title="Goods Receipt (Recepción)" icon="truck-ramp-box">
+    Post individual item receipts via `POST /recepcion` when stock arrives outside the remito workflow. This increments the product's `stockActual` immediately.
+  </Card>
+  <Card title="Remito Creation" icon="file-lines">
+    Create supplier delivery note records via `POST /recepciones-remito`. The remito is created with a `PENDIENTE` status and queued for admin approval before stock is committed. Employees can view their own submitted remitos via `GET /recepciones-remito/mis-recepciones`.
+  </Card>
+  <Card title="Today's Sales" icon="clock">
+    `GET /ventas/mis-ventas-hoy` returns all POS sales processed by the currently authenticated employee today (scoped to their `cajeroId`). Employees cannot see sales from other cashiers or from previous days.
+  </Card>
+  <Card title="Supplier List (Read-Only)" icon="address-book">
+    `GET /proveedores` is available to employees for reference during goods receipt. All other supplier management endpoints (`POST`, `PUT`, `DELETE`) are restricted to ADMIN.
+  </Card>
+</CardGroup>
+
+## Employee-Only API Endpoints
+
+The following endpoints are restricted to `EMPLEADO` (or shared between `ADMIN` and `EMPLEADO`, noted where applicable):
+
+| Method | Path | Access | Description |
+|---|---|---|---|
+| `GET` | `/productos/empleado` | EMPLEADO only | Full product list — omits cost price and supplier |
+| `GET` | `/productos/empleado/sku/{sku}` | EMPLEADO only | Product lookup by SKU — omits cost price and supplier |
+| `GET` | `/productos/empleado/barcode/{codigo}` | EMPLEADO only | Product lookup by barcode — omits cost price and supplier |
+| `GET` | `/ventas/mis-ventas-hoy` | EMPLEADO only | Authenticated employee's sales for today |
+| `POST` | `/ventas` | ADMIN, EMPLEADO, CLIENTE | Register a new sale (POS origin for EMPLEADO) |
+| `GET` | `/ventas/{id}` | ADMIN, EMPLEADO | Retrieve a single sale by ID |
+| `GET` | `/ventas/{id}/detalle` | ADMIN, EMPLEADO | Full line-item detail for a sale |
+| `POST` | `/recepcion` | ADMIN, EMPLEADO | Post a single-item stock receipt |
+| `POST` | `/recepciones-remito` | ADMIN, EMPLEADO | Create a new remito receipt header |
+| `GET` | `/recepciones-remito/mis-recepciones` | ADMIN, EMPLEADO | List remitos created by the authenticated user |
+| `GET` | `/recepciones-remito/{id}` | ADMIN, EMPLEADO | Detail of a specific remito |
+| `GET` | `/proveedores` | ADMIN, EMPLEADO | Read-only supplier list |
+
+## Restrictions
+
+Understanding what employees **cannot** do is just as important as knowing what they can:
+
+- **No cost prices or supplier names.** The `/productos/empleado` endpoints return `ProductoEmpleadoDTO`, which is a projection that strips `precioCompra` and `nombreProveedor`. Calling the full admin product endpoints (`GET /productos`, `GET /productos/sku/{sku}`, `GET /productos/barcode/{codigo}`) returns `403 Forbidden` for employees.
+- **Cannot approve remitos.** Employees create remito records (`POST /recepciones-remito`) but cannot confirm them. Approval — which triggers the actual stock commit — is gated behind `PATCH /recepciones-remito/{id}/confirmar`, which is `ADMIN`-only.
+- **No dashboard access.** All `/dashboard/**` endpoints are `ADMIN`-only. The React app redirects employees directly to `/pos` after login.
+- **No stock adjustments.** Manual stock corrections (`POST /ajustes-stock`, `GET /ajustes-stock`) are `ADMIN`-only.
+- **No invoice OCR.** The `/facturas/**` endpoints are `ADMIN`-only.
+- **Cannot void sales.** `PUT /ventas/{id}/anular` is `ADMIN`-only.
+
+## Frontend Routes (Empleado)
+
+The React app (`App.jsx`) uses `<ProtectedRoute requiereEmpleado>` to grant employees access to these routes (which are also accessible to admins):
+
+| Route | Component | Description |
+|---|---|---|
+| `/pos` | `POS` | Barcode-scanner POS terminal — default post-login page for employees |
+| `/recepcion` | `RecepcionPage` | Single-item stock receipt form |
+| `/productos` | `Productos` | Product browser (displays employee-safe data) |
+| `/ventas` | `Ventas` | Sales list (employees see their own; admins see all) |
+
+<Tip>
+  **Barcode scanner workflow:** During a POS sale, employees typically use `GET /productos/empleado/barcode/{codigo}` to look up a product by scanning its barcode. The endpoint returns the product name, `precioVenta`, current stock level, and category — everything needed to complete the sale without exposing margin data. In the POS terminal (`/pos`), this lookup happens automatically on each scan before adding the item to the cart.
+</Tip>

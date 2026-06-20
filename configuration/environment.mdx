@@ -1,0 +1,125 @@
+---
+title: "Environment and Application Configuration Reference"
+sidebarTitle: "Environment"
+description: "Complete reference for all Ferromax ERP configuration properties: server port, CORS origins, caching, OCR API key, multipart upload limits, WebSocket settings, and logging levels."
+---
+
+All Ferromax ERP backend configuration is managed through a single file: `src/main/resources/application.properties`. Every category of settings — from the HTTP port to the OCR integration key — lives here. This page catalogs every property, its default value, and when you should change it.
+
+## Server
+
+The embedded Tomcat server is pre-configured to expose the API under the `/api` context path on port `8081`. Response compression is enabled by default to reduce bandwidth for JSON and HTML payloads.
+
+| Property | Default | Description |
+|---|---|---|
+| `server.port` | `8081` | The TCP port the application listens on. Change this if `8081` conflicts with another local service. |
+| `server.servlet.context-path` | `/api` | All endpoints are prefixed with this path. For example, the login endpoint resolves to `http://localhost:8081/api/auth/login`. |
+| `server.compression.enabled` | `true` | Enables GZIP compression for responses whose `Content-Type` matches `application/json`, `application/xml`, `text/html`, or `text/plain`. |
+
+## WebSocket / STOMP
+
+Ferromax ERP uses STOMP over SockJS for real-time features such as low-stock alerts and live dashboard updates. The WebSocket settings below are read by `WebSocketConfig.java` and by Spring's property injection.
+
+| Property | Default | Description |
+|---|---|---|
+| `app.websocket.endpoint` | `/ws` | The SockJS handshake endpoint. The full URL in development is `http://localhost:8081/ws`. |
+| `app.websocket.topic-prefix` | `/topic` | Prefix for server-to-client broadcast destinations (e.g., `/topic/alertas`). |
+| `app.websocket.app-prefix` | `/app` | Prefix for client-to-server message destinations handled by `@MessageMapping` controllers. |
+| `app.websocket.allowed-origins` | `http://localhost:3000, http://localhost:4200, http://localhost:5173, http://localhost:5174, http://localhost:5175` | Comma-separated list of origins permitted to open a WebSocket connection. The frontend `.env` also exposes `VITE_WS_URL=http://localhost:8081/ws` for the client-side connection string. |
+
+<Warning>
+  Production deployments must add the actual frontend domain to `app.websocket.allowed-origins`. Leaving the list set to `localhost` origins will block all real-user WebSocket connections in production.
+</Warning>
+
+## Caching
+
+Ferromax uses **Caffeine** as its in-memory cache provider. The product catalog and category trees are cached to avoid redundant database round-trips on every page load.
+
+| Property | Default | Description |
+|---|---|---|
+| `spring.cache.type` | `caffeine` | Selects the Caffeine cache implementation. |
+| `spring.cache.caffeine.spec` | `maximumSize=500,expireAfterWrite=600s` | The cache policy applied to all named caches: up to 500 entries, each expiring 10 minutes after it was last written. |
+
+Once an entry expires, the next request for that data triggers a fresh database query and repopulates the cache. No manual cache invalidation is required for normal catalog updates.
+
+## OCR Integration
+
+The invoice-scanning feature sends uploaded images to the [OCR.space](https://ocr.space) REST API and parses the resulting text to pre-fill reception forms.
+
+| Property | Default | Description |
+|---|---|---|
+| `ocr.space.api.key` | `helloworld` | The API key sent in every OCR request. The default value `helloworld` is OCR.space's publicly documented free test key. |
+
+<Warning>
+  The `helloworld` key is **rate-limited to 25,000 requests per month** and is shared across all developers who use it as a demo key. For any non-trivial usage, register at [ocr.space/ocrapi](https://ocr.space/ocrapi) to obtain a dedicated free key (also 25k req/month) or a paid key with higher limits.
+</Warning>
+
+## File Upload
+
+These limits apply to multipart form-data requests, primarily the invoice image uploads consumed by the OCR feature.
+
+| Property | Default | Description |
+|---|---|---|
+| `spring.servlet.multipart.enabled` | `true` | Activates Spring's multipart resolver. |
+| `spring.servlet.multipart.max-file-size` | `20MB` | Maximum size of a single uploaded file. |
+| `spring.servlet.multipart.max-request-size` | `20MB` | Maximum total size of the entire multipart request (all parts combined). |
+
+## Jackson (JSON)
+
+Spring's Jackson `ObjectMapper` is pre-configured for Argentine locale conventions and a clean JSON output.
+
+| Property | Default | Description |
+|---|---|---|
+| `spring.jackson.serialization.write-dates-as-timestamps` | `false` | Dates are serialized as ISO 8601 strings (e.g., `2024-08-15T10:30:00`) instead of Unix millisecond integers. |
+| `spring.jackson.time-zone` | `America/Argentina/Buenos_Aires` | All date/time values are rendered in UTC-3 (Argentina Standard Time). |
+| `spring.jackson.locale` | `es_AR` | Sets the default locale for number formatting and locale-sensitive serialization. |
+| `spring.jackson.default-property-inclusion` | `non_null` | Fields with a `null` value are **omitted** from JSON responses, keeping payloads lean. |
+
+## Actuator
+
+Spring Boot Actuator exposes operational endpoints for health checks and metrics. Only the three safest endpoints are exposed.
+
+| Property | Default | Description |
+|---|---|---|
+| `management.endpoints.web.exposure.include` | `health,info,metrics` | Limits the exposed Actuator endpoints to health, application info, and JVM/HTTP metrics. |
+| `management.endpoint.health.show-details` | `when-authorized` | Full datasource and disk-space details are only visible to authenticated users. |
+
+The health endpoint is available at `GET http://localhost:8081/api/actuator/health` and returns `{ "status": "UP" }` when the application and database connection are healthy.
+
+## Logging
+
+| Property | Default | Description |
+|---|---|---|
+| `logging.level.root` | `INFO` | Default log level for all frameworks and third-party libraries. |
+| `logging.level.com.ferromax` | `DEBUG` | Verbose debug logging for all Ferromax application classes. |
+| `logging.level.org.springframework.security` | `INFO` | Spring Security logs at INFO to avoid leaking sensitive authentication detail. |
+| `logging.level.org.hibernate.SQL` | `WARN` | SQL statement logging is suppressed unless there is a warning or error. |
+
+<Info>
+  For production, set `logging.level.com.ferromax=INFO` to reduce log volume. The `DEBUG` level logs internal service method calls and is intended for local development only.
+</Info>
+
+The console log pattern is:
+
+```
+%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n
+```
+
+## Frontend Environment (`.env`)
+
+The Vite frontend (`ferromax-web/`) reads its own environment file at `ferromax-web/.env`. This file configures the base URLs the browser uses to reach the backend.
+
+```properties
+# ferromax-web/.env
+VITE_API_URL=http://localhost:8081/api
+VITE_WS_URL=http://localhost:8081/ws
+```
+
+| Variable | Value | Description |
+|---|---|---|
+| `VITE_API_URL` | `http://localhost:8081/api` | Base URL for all REST calls. Note that `axiosClient.js` uses the Vite dev proxy path `/api` at runtime — this variable is the fallback for non-proxied builds. |
+| `VITE_WS_URL` | `http://localhost:8081/ws` | WebSocket endpoint URL passed to the SockJS client constructor. |
+
+<Note>
+  In `ferromax-web/src/api/axiosClient.js`, `baseURL` is set to the relative path `/api` so that Vite's dev-server proxy forwards requests transparently. `VITE_API_URL` becomes the effective base URL in production builds where no proxy is present.
+</Note>

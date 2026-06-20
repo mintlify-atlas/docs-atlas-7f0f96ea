@@ -1,0 +1,171 @@
+---
+title: "Inventory Management: Stock, Receipts, and Adjustments"
+sidebarTitle: "Inventory"
+description: "Manage Ferromax ERP inventory through goods receipt (recepción directa), remito-based supplier delivery workflows, manual stock adjustments, and a full movement audit trail."
+---
+
+Ferromax ERP provides three distinct ways to change stock levels: direct goods receipt for quick single-item additions, the two-step remito workflow for multi-item supplier deliveries, and manual stock adjustments for corrections and write-offs. Every operation — regardless of which path is used — creates a `MovimientoStock` audit record so that the full history of every SKU is always traceable.
+
+## Direct Goods Receipt
+
+The simplest way to add stock is a direct receipt, available at `/recepcion`. An **ADMIN** or **EMPLEADO** can register the arrival of a single product immediately, with no approval step required.
+
+**Endpoint:**
+
+```
+POST /api/recepcion
+Authorization: Bearer <jwt>
+Content-Type: application/json
+```
+
+The `RecepcionRequest` body:
+
+```json
+{
+  "productoId": 42,
+  "cantidad": 10,
+  "observaciones": "Remito N° 1234, proveedor EPSA"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `productoId` | `Long` | ✅ | Internal product ID |
+| `cantidad` | `Integer` | ✅ | Units to add to stock |
+| `observaciones` | `String` | — | Free-text note (e.g. remito number) |
+
+On success the endpoint returns a `RecepcionResponse` (`201 Created`) with the product name, SKU, units received, previous stock, and new stock. The `RecepcionPage.jsx` UI shows these values in a confirmation panel with a **"Recibir otro producto"** button.
+
+The backend records the receiving employee's ID from the JWT (`empleadoId`) so every receipt is attributed to its operator.
+
+## Remito Workflow
+
+For multi-item supplier deliveries that require admin review before stock is updated, use the remito (delivery note) workflow, available at `/remitos`.
+
+<Steps>
+  <Step title="Employee creates a remito">
+    Any **ADMIN** or **EMPLEADO** opens the Remitos page and creates a new remito. The frontend sends:
+
+    ```
+    POST /api/recepciones-remito
+    Authorization: Bearer <jwt>
+    Content-Type: application/json
+    ```
+
+    `RecepcionRemitoRequest` body:
+
+    ```json
+    {
+      "proveedorId": 5,
+      "items": [
+        { "productoId": 12, "cantidad": 20 },
+        { "productoId": 37, "cantidad": 5 }
+      ]
+    }
+    ```
+
+    The remito is saved with status `PENDIENTE`. The employee can view their own submitted remitos at `GET /api/recepciones-remito/mis-recepciones`.
+  </Step>
+  <Step title="Admin reviews pending remitos">
+    An admin fetches all unconfirmed remitos:
+
+    ```
+    GET /api/recepciones-remito/pendientes
+    ```
+
+    Each row in `RemitosPage.jsx` shows the supplier name, remito number, creation date, employee who submitted it, item count, and an expandable item list. A **Revisar** button opens a modal with full item detail and optional admin notes.
+  </Step>
+  <Step title="Admin confirms or rejects">
+    From the review modal the admin sends:
+
+    ```
+    PATCH /api/recepciones-remito/{id}/confirmar
+    Authorization: Bearer <jwt>
+    Content-Type: application/json
+    ```
+
+    ```json
+    {
+      "aprobar": true,
+      "notasAdmin": "Quantities verified against physical delivery"
+    }
+    ```
+
+    Set `aprobar: false` to reject. The admin's ID is extracted from the JWT and stored on the record.
+  </Step>
+  <Step title="Stock updates on confirmation">
+    When `aprobar: true`, the service iterates over every item in the remito and increases the product's `stockActual` by the specified quantity. A `MovimientoStock` record is created for each product, and if the new stock no longer triggers a low-stock threshold the associated `AlertaStock` is cleared. The remito status is updated to `CONFIRMADO`.
+  </Step>
+</Steps>
+
+The full remito list (all statuses) is available at `GET /api/recepciones-remito`. Admins can also retrieve a single remito by ID at `GET /api/recepciones-remito/{id}`.
+
+## Manual Stock Adjustment
+
+When stock needs to be corrected without a supplier receipt — inventory count discrepancies, breakage, theft, or returns — admins use the manual adjustment page at `/ajuste-stock`.
+
+**Endpoint:**
+
+```
+POST /api/ajustes-stock
+Authorization: Bearer <jwt>  (ADMIN only)
+Content-Type: application/json
+```
+
+`AjusteStockRequest` body:
+
+```java
+public record AjusteStockRequest(
+    Long    productoId,  // target product
+    Integer cantidad,    // positive = stock increase, negative = decrease
+    String  motivo       // required, max 500 chars
+) {}
+```
+
+```json
+{
+  "productoId": 17,
+  "cantidad": -3,
+  "motivo": "Inventory count discrepancy — 3 units unaccounted for"
+}
+```
+
+The `AjusteStockPage.jsx` UI presents a product search field, toggle buttons for **Entrada (+)** and **Salida (−)**, a quantity input, and a motivo textarea. It previews the resulting stock level before submission and blocks the request if the result would go negative.
+
+**Adjustment history** is paginated and available at:
+
+```
+GET /api/ajustes-stock?page=0&size=50
+```
+
+The response is a Spring `Page<AjusteStockResponse>` with fields including `movimientoId`, `nombreProducto`, `sku`, `cantidad`, `stockAnterior`, `stockNuevo`, `motivo`, `fecha`, and `nombreAdmin`.
+
+<Warning>
+Manual adjustments are **irreversible**. There is no undo operation — once confirmed, the quantity delta is written to the product's `stockActual` and a `MovimientoStock` record is created. Always verify the product, direction (+ or −), and quantity before clicking **Registrar ajuste**.
+</Warning>
+
+## Stock Alerts
+
+Ferromax ERP automatically generates an `AlertaStock` record whenever a product's stock falls at or below its configured `stockMinimo` threshold. This happens during:
+
+- A completed sale (via the POS or Tienda checkout)
+- A manual stock adjustment with a negative delta
+
+Admins see unread alerts in the dashboard's `AlertaStockPanel`. The count of products below their minimum is also surfaced in the `productosStockCritico` KPI card (`DashboardDTO`).
+
+A WebSocket event is broadcast to `/topic/stock-update` whenever a low-stock condition is triggered or resolved, so the dashboard panel updates in real time without a page refresh.
+
+## Movement Audit Trail
+
+Every stock change in the system — regardless of origin — creates a `MovimientoStock` record with the following information:
+
+| Field | Description |
+|---|---|
+| `timestamp` | `OffsetDateTime` of the change (Argentina TZ) |
+| `tipoMovimiento` | `TipoMovimientoEnum` — e.g. `VENTA`, `RECEPCION`, `AJUSTE` |
+| `cantidad` | Signed integer delta (positive = increase, negative = decrease) |
+| `stockAnterior` | Stock level before the change |
+| `stockNuevo` | Stock level after the change |
+| `usuarioId` | ID of the user (cashier, employee, or admin) who triggered it |
+
+This trail provides a complete, tamper-resistant history for every SKU and is the source of truth for stock discrepancy investigations.

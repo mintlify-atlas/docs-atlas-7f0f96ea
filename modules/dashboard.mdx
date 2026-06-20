@@ -1,0 +1,114 @@
+---
+title: "Admin Dashboard: KPIs, Sales Charts, and Stock Alerts"
+sidebarTitle: "Dashboard"
+description: "The Ferromax ERP dashboard gives admins real-time KPIs, a weekly sales bar chart, recent transactions, and unread stock alert notifications."
+---
+
+The dashboard is the home screen for administrators, surfacing the most important business metrics at a glance. It loads all data in parallel on mount and re-fetches on every navigation to the route, ensuring figures are always current. A manual **Actualizar** button with a spinning icon is available in the header for on-demand refreshes.
+
+## KPI Cards
+
+Four metric cards are rendered at the top of the page, sourced from a single `GET /api/dashboard/resumen` call that returns a `DashboardDTO`:
+
+```java
+public record DashboardDTO(
+    BigDecimal ventasHoy,        // today's completed-sale revenue
+    Integer    cantidadVentasHoy, // number of completed sales today
+    Integer    productosStockCritico, // products below their stockMinimo
+    Integer    pedidosPendientes,     // online orders in PENDIENTE or CONFIRMADO
+    BigDecimal saldoCaja              // cash-only revenue (EFECTIVO) today
+) {}
+```
+
+| Card | Field | Color |
+|---|---|---|
+| **Ventas del día** | `ventasHoy` (ARS) + `cantidadVentasHoy` subtitle | Green |
+| **Stock crítico** | `productosStockCritico` | Red |
+| **Pedidos online** | `pedidosPendientes` | Blue |
+| **Caja efectivo** | `saldoCaja` (ARS) | Orange |
+
+Each card is rendered by the `KPICard` component (`components/dashboard/KPICard.jsx`), which accepts a `color` prop (`verde`, `rojo`, `azul`, `naranja`) and a `staggerIndex` to produce a cascading entrance animation via Framer Motion.
+
+## Weekly Sales Chart
+
+A bar chart rendered below the KPI cards shows daily revenue for the **last 7 days**. The data comes from:
+
+```
+GET /api/dashboard/ventas-semana
+```
+
+The service iterates over the 7 days ending today (Argentina time zone `America/Argentina/Buenos_Aires`) and queries the sum of `COMPLETADA` sales per day. The response is a `List<VentaDiariaDTO>`:
+
+```java
+public record VentaDiariaDTO(
+    LocalDate  fecha,       // e.g. "2025-06-10"
+    BigDecimal totalVentas  // ARS total for that day; 0 if no sales
+) {}
+```
+
+The chart is rendered by `VentasBarChart`, which is composed inside a `SectionCard` wrapper and takes up two-thirds of the grid on large screens. The Y-axis is formatted in ARS without decimals.
+
+## Recent Transactions
+
+The last 10 completed sales across all payment methods are shown in a compact table, fetched from:
+
+```
+GET /api/dashboard/transacciones
+```
+
+The backend calls `DashboardService.ultimasTransacciones(10)`, ordering by `fecha DESC`. Each row is a `VentaResponse`:
+
+```java
+public record VentaResponse(
+    Long           id,
+    OffsetDateTime fecha,
+    BigDecimal     total,
+    String         estado,       // COMPLETADA | PENDIENTE | ANULADA
+    String         medioPago,    // EFECTIVO | DEBITO | CREDITO | MERCADOPAGO
+    String         nombreCajero,
+    Integer        cantidadItems,
+    String         origen        // POS | WEB
+) {}
+```
+
+The table columns are **Hora**, **Cajero**, **Medio de pago**, **Monto**, and **Estado**. The `estado` cell uses colour-coded pill badges (emerald for COMPLETADA, amber for PENDIENTE, red for ANULADA).
+
+## Stock Alerts Panel
+
+The `AlertaStockPanel` component (`components/dashboard/AlertaStockPanel.jsx`) occupies the right column of the chart row. It shows every product whose `stockActual` has dropped below its `stockMinimo` threshold.
+
+**Backend endpoints:**
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/alertas` | Returns all unread `AlertaStock` records |
+| `PUT` | `/api/alertas/{id}/leer` | Marks a single alert as read and removes it from the panel |
+| `PUT` | `/api/alertas/leer-todas` | Marks all alerts read at once |
+
+Each alert row shows the product name, current stock (in red when `stockActual === 0`, amber otherwise), and the configured minimum. Two action buttons appear on hover: a shopping-cart icon (create purchase order — coming soon) and a checkmark to mark as read.
+
+When all alerts have been dismissed the panel displays a `PackageCheck` icon with the message **"Todo el stock en orden"**.
+
+## Real-time Updates
+
+The dashboard subscribes to a **WebSocket STOMP** topic so that stock changes are reflected without a full page reload.
+
+```
+/topic/stock-update
+```
+
+The POS page (`POS.jsx`) additionally subscribes to per-product topics:
+
+```
+/topic/stock/{productoId}
+```
+
+When a sale is registered or a stock adjustment is confirmed, the Spring backend broadcasts an event carrying `productoId` and `stockActual`. The frontend receives the message, updates local state for the affected product, and—if the new stock falls below `stockMinimo`—a new alert appears in the `AlertaStockPanel` without requiring a refresh.
+
+The STOMP client is initialised with `SockJS` at `/api/ws` and reconnects automatically every 5 seconds if the connection drops.
+
+## Access
+
+<Info>
+The dashboard is restricted to the **ADMIN** role via `@PreAuthorize("hasRole('ADMIN')")` on `DashboardController`. Users who log in with the **EMPLEADO** role are redirected to the POS terminal at `/pos`. Users with the **CLIENTE** role are redirected to the storefront at `/tienda`.
+</Info>

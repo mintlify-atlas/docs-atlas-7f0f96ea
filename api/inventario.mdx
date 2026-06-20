@@ -1,0 +1,416 @@
+---
+title: "Inventory API: Receipts, Remitos, and Stock Adjustments"
+sidebarTitle: "Inventory"
+description: "REST endpoints for inventory management in Ferromax ERP: direct goods receipt, two-step remito supplier workflow, and manual stock adjustments with pagination."
+---
+
+The inventory API group covers three stock management workflows: **direct goods receipt** for immediate single-item additions without an approval step, the **remito workflow** for multi-item supplier deliveries that require admin confirmation before stock is updated, and **manual adjustments** for ad-hoc corrections backed by a full audit trail. All endpoints require a JWT Bearer token.
+
+---
+
+## POST /api/recepcion
+
+Immediately increases the stock level of a single product. The movement is recorded in `MovimientoStock` and takes effect instantly — there is no approval step.
+
+**Auth:** `ADMIN` or `EMPLEADO`
+
+The `empleadoId` performing the receipt is extracted from the JWT; it does not need to be sent in the request body.
+
+### Request Body (`RecepcionRequest`)
+
+<ParamField body="productoId" type="Long" required>
+  ID of the product whose stock is being replenished.
+</ParamField>
+
+<ParamField body="cantidad" type="Integer" required>
+  Number of units received. Minimum `1`.
+</ParamField>
+
+<ParamField body="notas" type="string">
+  Optional free-text note about the receipt (e.g. delivery reference). Maximum 500 characters.
+</ParamField>
+
+<ParamField body="recepcionRemitoId" type="Long">
+  Optional ID of an existing remito to associate this movement with. Use when manually linking a direct receipt to a supplier remito record.
+</ParamField>
+
+### Response `201 Created`
+
+Returns a `RecepcionResponse`.
+
+<ResponseField name="movimientoId" type="Long">
+  ID of the generated `MovimientoStock` record.
+</ResponseField>
+
+<ResponseField name="productoId" type="Long">
+  ID of the restocked product.
+</ResponseField>
+
+<ResponseField name="sku" type="string">
+  SKU of the restocked product.
+</ResponseField>
+
+<ResponseField name="nombreProducto" type="string">
+  Display name of the restocked product.
+</ResponseField>
+
+<ResponseField name="cantidadRecibida" type="Integer">
+  Units added to stock.
+</ResponseField>
+
+<ResponseField name="stockAnterior" type="Integer">
+  Stock level immediately before this receipt.
+</ResponseField>
+
+<ResponseField name="stockNuevo" type="Integer">
+  Stock level after this receipt (`stockAnterior + cantidadRecibida`).
+</ResponseField>
+
+<ResponseField name="fecha" type="OffsetDateTime">
+  Timestamp of the movement in ISO-8601 format.
+</ResponseField>
+
+```bash
+curl -X POST http://localhost:8081/api/recepcion \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productoId": 12,
+    "cantidad": 50,
+    "notas": "Reposición semanal proveedor Brida S.A."
+  }'
+```
+
+---
+
+## POST /api/recepciones-remito
+
+Creates a **pending** supplier delivery (remito). The remito captures header information — supplier, remito number, and notes — but does **not** update stock. An admin must approve the remito before stock levels change.
+
+**Auth:** `ADMIN` or `EMPLEADO`
+
+The `empleadoId` who created the remito is extracted from the JWT automatically.
+
+### Request Body (`RecepcionRemitoRequest`)
+
+<ParamField body="proveedorId" type="Long" required>
+  ID of the supplier issuing the remito.
+</ParamField>
+
+<ParamField body="numeroRemito" type="string" required>
+  Supplier's document number for this delivery. Maximum 100 characters. Used as a human-readable reference and deduplication key.
+</ParamField>
+
+<ParamField body="notas" type="string">
+  Optional free-text notes about the delivery. Maximum 500 characters.
+</ParamField>
+
+### Response `201 Created`
+
+Returns a `RecepcionRemitoResponse`. The `estado` field will be `PENDIENTE`.
+
+<Note>
+  After creating a remito header, add individual product lines by creating `RecepcionRequest` records with `recepcionRemitoId` set to the new remito ID. Then submit the remito for admin approval via [PATCH /api/recepciones-remito/\{id\}/confirmar](#patch-apirecepciones-remitoidconfirmar).
+</Note>
+
+---
+
+## GET /api/recepciones-remito/mis-recepciones
+
+Returns all remito receipts created by the authenticated user. Both `ADMIN` and `EMPLEADO` callers see only their own records.
+
+**Auth:** `ADMIN` or `EMPLEADO`
+
+### Response `200 OK`
+
+Returns an array of `RecepcionRemitoResponse`. See [RecepcionRemitoResponse fields](#recepcionremitoresponse-fields) below.
+
+---
+
+## GET /api/recepciones-remito/pendientes
+
+Returns all remitos currently in `PENDIENTE` state, across all employees. Use this endpoint to build the admin approval queue.
+
+**Auth:** `ADMIN`
+
+### Response `200 OK`
+
+Returns an array of `RecepcionRemitoResponse` where `estado = PENDIENTE`.
+
+---
+
+## GET /api/recepciones-remito
+
+Returns all remitos regardless of state (`PENDIENTE`, `CONFIRMADO`, or `RECHAZADO`).
+
+**Auth:** `ADMIN`
+
+### Response `200 OK`
+
+Returns an array of `RecepcionRemitoResponse`.
+
+---
+
+## GET /api/recepciones-remito/\{id\}
+
+Returns the full details of a single remito, including its item list.
+
+**Auth:** `ADMIN` or `EMPLEADO`
+
+### Path Parameters
+
+<ParamField path="id" type="Long" required>
+  Internal remito identifier.
+</ParamField>
+
+### Response `200 OK`
+
+Returns a `RecepcionRemitoResponse`.
+
+---
+
+## PATCH /api/recepciones-remito/\{id\}/confirmar
+
+Confirms or rejects a pending remito. On confirmation (`aprobar: true`), all associated `MovimientoStock` records are applied and product stock levels are updated atomically. On rejection (`aprobar: false`), no stock change occurs.
+
+**Auth:** `ADMIN`
+
+### Path Parameters
+
+<ParamField path="id" type="Long" required>
+  Internal remito identifier. Must currently be in `PENDIENTE` state.
+</ParamField>
+
+### Request Body (`ConfirmarRemitoRequest`)
+
+<ParamField body="aprobar" type="boolean" required>
+  `true` to confirm the remito and update stock; `false` to reject it. The resulting `estado` will be `CONFIRMADO` or `RECHAZADO` respectively.
+</ParamField>
+
+<ParamField body="notasAdmin" type="string">
+  Optional admin notes explaining the decision (e.g. reason for rejection). Maximum 500 characters.
+</ParamField>
+
+### Response `200 OK`
+
+Returns the updated `RecepcionRemitoResponse` with the new `estado` and `confirmadoAt` timestamp.
+
+---
+
+### RecepcionRemitoResponse Fields
+
+<ResponseField name="id" type="Long">
+  Internal remito identifier.
+</ResponseField>
+
+<ResponseField name="proveedorId" type="Long">
+  ID of the associated supplier.
+</ResponseField>
+
+<ResponseField name="nombreProveedor" type="string">
+  Display name of the supplier.
+</ResponseField>
+
+<ResponseField name="numeroRemito" type="string">
+  Supplier's document number for this delivery.
+</ResponseField>
+
+<ResponseField name="estado" type="string">
+  Current approval state. One of `PENDIENTE`, `CONFIRMADO`, `RECHAZADO`.
+</ResponseField>
+
+<ResponseField name="nombreEmpleado" type="string">
+  Full name of the employee who created the remito.
+</ResponseField>
+
+<ResponseField name="nombreAdmin" type="string">
+  Full name of the admin who confirmed or rejected the remito. `null` while still pending.
+</ResponseField>
+
+<ResponseField name="notas" type="string">
+  Employee notes recorded at creation time. May be `null`.
+</ResponseField>
+
+<ResponseField name="notasAdmin" type="string">
+  Admin notes recorded at confirmation / rejection time. May be `null`.
+</ResponseField>
+
+<ResponseField name="createdAt" type="OffsetDateTime">
+  Timestamp when the remito was created.
+</ResponseField>
+
+<ResponseField name="confirmadoAt" type="OffsetDateTime">
+  Timestamp when the remito was confirmed or rejected. `null` while still pending.
+</ResponseField>
+
+<ResponseField name="items" type="array">
+  Stock movement lines associated with this remito. Populated after individual `RecepcionRequest` records are linked.
+
+  <Expandable title="ItemRecepcionResponse fields">
+    <ResponseField name="movimientoId" type="Long">
+      ID of the `MovimientoStock` record.
+    </ResponseField>
+    <ResponseField name="productoId" type="Long">
+      ID of the product received.
+    </ResponseField>
+    <ResponseField name="sku" type="string">
+      SKU of the product received.
+    </ResponseField>
+    <ResponseField name="nombreProducto" type="string">
+      Product display name.
+    </ResponseField>
+    <ResponseField name="cantidad" type="Integer">
+      Units received in this line.
+    </ResponseField>
+    <ResponseField name="stockAnterior" type="Integer">
+      Stock level before confirmation.
+    </ResponseField>
+    <ResponseField name="stockNuevo" type="Integer">
+      Stock level after confirmation. Equals `stockAnterior` if the remito was rejected.
+    </ResponseField>
+    <ResponseField name="fecha" type="OffsetDateTime">
+      Timestamp of the movement application.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## POST /api/ajustes-stock
+
+Manually increases or decreases the stock of any product. Every adjustment creates an immutable `MovimientoStock` audit record attributed to the calling admin.
+
+**Auth:** `ADMIN`
+
+### Request Body (`AjusteStockRequest`)
+
+<ParamField body="productoId" type="Long" required>
+  ID of the product to adjust.
+</ParamField>
+
+<ParamField body="cantidad" type="Integer" required>
+  Units to add (positive integer) or remove (negative integer). For example, `10` adds ten units; `-3` removes three units.
+</ParamField>
+
+<ParamField body="motivo" type="string" required>
+  Human-readable reason for the adjustment (e.g. `"Rotura en depósito"`, `"Corrección inventario físico"`). Maximum 500 characters.
+</ParamField>
+
+### Response `201 Created`
+
+Returns an `AjusteStockResponse`.
+
+<ResponseField name="movimientoId" type="Long">
+  ID of the created `MovimientoStock` record.
+</ResponseField>
+
+<ResponseField name="productoId" type="Long">
+  ID of the adjusted product.
+</ResponseField>
+
+<ResponseField name="sku" type="string">
+  SKU of the adjusted product.
+</ResponseField>
+
+<ResponseField name="nombreProducto" type="string">
+  Display name of the adjusted product.
+</ResponseField>
+
+<ResponseField name="cantidad" type="Integer">
+  The signed adjustment applied (`+` for addition, `-` for removal).
+</ResponseField>
+
+<ResponseField name="stockAnterior" type="Integer">
+  Stock level before the adjustment.
+</ResponseField>
+
+<ResponseField name="stockNuevo" type="Integer">
+  Stock level after the adjustment.
+</ResponseField>
+
+<ResponseField name="motivo" type="string">
+  Reason for the adjustment as supplied in the request.
+</ResponseField>
+
+<ResponseField name="nombreAdmin" type="string">
+  Full name of the admin who performed the adjustment.
+</ResponseField>
+
+<ResponseField name="fecha" type="OffsetDateTime">
+  Timestamp of the adjustment in ISO-8601 format.
+</ResponseField>
+
+<Warning>
+  Stock adjustments are **irreversible** through the API. Negative adjustments can drive `stockActual` below zero if no floor validation is configured. Always verify the current stock via [GET /api/productos/\{id\}](/api/productos#get-apiproductosid) before submitting a negative adjustment.
+</Warning>
+
+```bash
+curl -X POST http://localhost:8081/api/ajustes-stock \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productoId": 47,
+    "cantidad": -5,
+    "motivo": "Unidades dañadas detectadas en inventario físico mensual"
+  }'
+```
+
+---
+
+## GET /api/ajustes-stock
+
+Returns a paginated list of all manual stock adjustments, ordered from most recent to oldest.
+
+**Auth:** `ADMIN`
+
+### Query Parameters
+
+<ParamField query="page" type="integer">
+  Zero-based page number. Defaults to `0`.
+</ParamField>
+
+<ParamField query="size" type="integer">
+  Number of records per page. Defaults to `50`.
+</ParamField>
+
+### Response `200 OK`
+
+Returns a Spring `Page<AjusteStockResponse>` envelope.
+
+<ResponseField name="content" type="array">
+  Array of `AjusteStockResponse` objects for the current page.
+</ResponseField>
+
+<ResponseField name="totalElements" type="Long">
+  Total number of adjustments across all pages.
+</ResponseField>
+
+<ResponseField name="totalPages" type="Integer">
+  Total number of pages given the requested `size`.
+</ResponseField>
+
+<ResponseField name="number" type="Integer">
+  Current page number (zero-based).
+</ResponseField>
+
+<ResponseField name="size" type="Integer">
+  Page size used for this response.
+</ResponseField>
+
+<ResponseField name="first" type="boolean">
+  `true` if this is the first page.
+</ResponseField>
+
+<ResponseField name="last" type="boolean">
+  `true` if this is the last page.
+</ResponseField>
+
+---
+
+## Reference: `EstadoRecepcionEnum`
+
+| Value | Description |
+|---|---|
+| `PENDIENTE` | Remito created and awaiting admin review |
+| `CONFIRMADO` | Remito approved; stock has been updated |
+| `RECHAZADO` | Remito rejected by admin; no stock change applied |

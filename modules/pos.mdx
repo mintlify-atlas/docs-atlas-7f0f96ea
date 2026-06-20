@@ -1,0 +1,109 @@
+---
+title: "POS Terminal: Fast In-Store Sales Processing"
+sidebarTitle: "POS Terminal"
+description: "The Ferromax ERP POS terminal supports barcode scanner input, real-time cart management, multiple payment methods, and instant stock updates via WebSocket."
+---
+
+The POS terminal is the primary tool for store employees and admins processing in-store sales. It is optimised for speed — barcode scanning adds items to the cart instantly, and keyboard shortcuts reduce mouse interaction. The search input is auto-focused on page load and re-focused after every successful scan or item addition, keeping the operator's hands on the keyboard or scanner at all times.
+
+## How the POS Works
+
+<Steps>
+  <Step title="Search or scan a product">
+    The operator types a product name, SKU, or scans a barcode directly into the search field. The terminal detects scanner input by measuring the time elapsed per character — if the input arrives faster than 30 ms/character and has at least 4 characters, it is treated as a barcode scan.
+
+    Product lookup follows this priority order:
+
+    1. `GET /api/productos/empleado/barcode/{codigo}` — exact barcode match
+    2. `GET /api/productos/empleado/sku/{sku}` — exact SKU match
+    3. Name substring search across all active products (manual typing only)
+
+    Admin users call the equivalent admin endpoints (`/api/productos/barcode/{codigo}`, `/api/productos/sku/{sku}`) which may return additional pricing or supplier fields.
+  </Step>
+  <Step title="Product appears in the cart">
+    A matched product is added to the cart immediately. If the product is already in the cart, its quantity is incremented by 1. The `POSCarrito` component (`components/pos/POSCarrito.jsx`) renders each line item with the product name, SKU, per-unit price, line subtotal, and +/− quantity controls.
+  </Step>
+  <Step title="Adjust quantities">
+    The operator can tap **+** or **−** next to any cart line to change the quantity. Setting a quantity to 0 removes the item from the cart. A **Vaciar** (clear) button at the bottom of the cart list empties everything in one click.
+  </Step>
+  <Step title="Select a payment method">
+    Four payment method buttons are shown in a 2×2 grid on the right panel. The operator selects one before confirming the sale. When **Efectivo** (cash) is chosen, an extra field appears to enter the amount tendered and the change due is calculated live.
+  </Step>
+  <Step title="Confirm the sale">
+    The operator taps **COBRAR**. The frontend POSTs to:
+
+    ```
+    POST /api/ventas
+    Authorization: Bearer <jwt>
+    Content-Type: application/json
+    ```
+
+    ```json
+    {
+      "medioPago": "EFECTIVO",
+      "clienteId": null,
+      "items": [
+        { "productoId": 42, "cantidad": 2 },
+        { "productoId": 17, "cantidad": 1 }
+      ]
+    }
+    ```
+
+    The backend extracts the `cajeroId` and role from the JWT. Because the role is `ADMIN` or `EMPLEADO`, the origin is automatically set to `OrigenVentaEnum.POS`.
+  </Step>
+  <Step title="Stock updates and ticket modal">
+    On a `201 Created` response, the cart is cleared, a **ModalTicket** slides in showing the full receipt (line items, subtotal, discount if any, total, and payment method), and a WebSocket event fires to `/topic/stock/{productoId}` for every product sold. All other connected clients — including the dashboard — receive the updated stock level in real time.
+  </Step>
+</Steps>
+
+## Payment Methods
+
+These values correspond directly to `MedioPagoEnum` in the backend:
+
+| Enum value | Label | Icon |
+|---|---|---|
+| `EFECTIVO` | Efectivo (cash) | Banknote |
+| `DEBITO` | Débito (debit card) | CreditCard |
+| `CREDITO` | Crédito (credit card) | Building2 |
+| `MERCADOPAGO` | MP (MercadoPago) | CreditCard |
+
+The selected payment method is sent in the `medioPago` field of `VentaRequest`. Only one method can be active per sale.
+
+## Sale Origin
+
+`OrigenVentaEnum` records how and where a sale was made. The backend sets this value automatically — it is never sent by the frontend.
+
+```java
+public enum OrigenVentaEnum {
+    POS,  // any sale from the terminal (ADMIN or EMPLEADO)
+    WEB   // online purchase from the Tienda (CLIENTE)
+}
+```
+
+| Role | Origin assigned |
+|---|---|
+| `ADMIN` | `POS` |
+| `EMPLEADO` | `POS` |
+| `CLIENTE` | `WEB` |
+
+The `origen` field is stored on the `Venta` entity and returned in `VentaResponse`, making it easy to filter sales by channel in reports.
+
+## Access
+
+The POS terminal is accessible to **ADMIN** and **EMPLEADO** roles. The route is:
+
+```
+/pos
+```
+
+The `@PreAuthorize` annotation on `POST /api/ventas` is:
+
+```java
+@PreAuthorize("hasAnyRole('ADMIN','EMPLEADO','CLIENTE')")
+```
+
+CLIENTE users reach the same sale endpoint through the Tienda checkout, never through the POS UI.
+
+<Tip>
+The POS automatically uses the authenticated user's ID as the `cajeroId`. The backend extracts it from the JWT with `jwtTokenProvider.obtenerUsuarioIdDesdeToken(token)` — no manual input is needed. The cashier name displayed on the receipt ticket (`nombreCajero`) is resolved from the user entity at the time of sale.
+</Tip>

@@ -1,0 +1,119 @@
+{
+  "projectType": "saas",
+  "projectName": "Ferromax ERP",
+  "projectDescription": "A full-stack hardware store management system with a Spring Boot REST API backend, React frontend, point-of-sale terminal, inventory management, and a public e-commerce storefront.",
+  "theme": "almond",
+  "primaryColor": "#FF6B35",
+  "lightColor": "#F8F9FA",
+  "darkColor": "#1A1A2E",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "User Roles",
+            "pages": [
+              "roles/overview",
+              "roles/admin",
+              "roles/empleado",
+              "roles/cliente"
+            ]
+          },
+          {
+            "group": "Core Modules",
+            "pages": [
+              "modules/dashboard",
+              "modules/pos",
+              "modules/inventory",
+              "modules/storefront",
+              "modules/invoicing"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment",
+              "configuration/database",
+              "configuration/security"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/productos",
+              "api/ventas",
+              "api/inventario",
+              "api/dashboard",
+              "api/catalogo",
+              "api/websocket"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Point-of-Sale (POS) terminal with barcode scanner workflow",
+    "Real-time stock alerts via WebSocket/STOMP",
+    "PDF/OCR invoice scanning for automated stock ingestion",
+    "Role-based access control (Admin, Empleado, Cliente)",
+    "Public e-commerce storefront (Tienda) with cart and order tracking",
+    "Admin dashboard with KPIs, sales charts, and cash flow",
+    "Inventory management with remito-based goods receipt workflow",
+    "Manual stock adjustment with full audit trail",
+    "JWT-based stateless authentication",
+    "Caffeine-backed caching for catalog performance"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/login",
+    "POST /api/auth/register",
+    "GET /api/auth/me",
+    "GET /api/productos/publico",
+    "GET /api/productos (ADMIN)",
+    "POST /api/productos (ADMIN)",
+    "PUT /api/productos/{id} (ADMIN)",
+    "DELETE /api/productos/{id} (ADMIN)",
+    "GET /api/categorias",
+    "GET /api/categorias/productos",
+    "POST /api/ventas",
+    "GET /api/ventas (ADMIN)",
+    "GET /api/ventas/mis-compras (CLIENTE)",
+    "GET /api/ventas/mis-ventas-hoy (EMPLEADO)",
+    "PUT /api/ventas/{id}/anular (ADMIN)",
+    "GET /api/dashboard/resumen (ADMIN)",
+    "GET /api/dashboard/ventas-semana (ADMIN)",
+    "GET /api/dashboard/transacciones (ADMIN)",
+    "POST /api/recepcion",
+    "POST /api/recepciones-remito",
+    "PATCH /api/recepciones-remito/{id}/confirmar (ADMIN)",
+    "POST /api/ajustes-stock (ADMIN)",
+    "GET /api/ajustes-stock (ADMIN)",
+    "POST /api/facturas/analizar (ADMIN)",
+    "POST /api/facturas/confirmar (ADMIN)",
+    "GET /api/alertas (ADMIN)",
+    "PUT /api/alertas/{id}/leer (ADMIN)",
+    "WebSocket STOMP endpoint: /api/ws (SockJS)",
+    "WebSocket topic: /topic/stock-update"
+  ]
+}

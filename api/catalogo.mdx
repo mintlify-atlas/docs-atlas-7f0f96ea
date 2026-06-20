@@ -1,0 +1,267 @@
+---
+title: "Catalog API: Public Product Browse by Category"
+sidebarTitle: "Catalog"
+description: "Public REST endpoints for the Ferromax storefront catalog. Browse categories and paginated products without authentication, filtered by category and subcategory."
+---
+
+The Catalog API provides unauthenticated access to the product catalog for the public Tienda storefront. Products are organized into categories and subcategories, with paginated results for performance. No JWT token is required for any endpoint in this group — they are intentionally open so the storefront can load without requiring a user session.
+
+---
+
+## Categories
+
+### GET /api/categorias
+
+Returns the full list of product categories together with their subcategory labels, a product count, and preview image URLs. Used to render the category navigation sidebar and the home page category grid.
+
+**Authentication:** None — public endpoint.
+
+<ResponseField name="[]" type="array of CategoriaPublicaDTO">
+  List of all active categories.
+</ResponseField>
+
+<ResponseField name="[].nombre" type="string">
+  Display name of the category, e.g. `"Herramientas Eléctricas"`.
+</ResponseField>
+
+<ResponseField name="[].totalProductos" type="integer">
+  Total number of active products belonging to this category.
+</ResponseField>
+
+<ResponseField name="[].subcategorias" type="array of string">
+  Alphabetically sorted list of distinct subcategory labels within this category.
+</ResponseField>
+
+<ResponseField name="[].imagenesPreview" type="array of string">
+  URLs of up to 4 product images from this category, used for the mosaic preview tile. May be an empty array if no products have images.
+</ResponseField>
+
+```bash
+curl http://localhost:8081/api/categorias
+```
+
+```json
+[
+  {
+    "nombre": "Herramientas Eléctricas",
+    "totalProductos": 48,
+    "subcategorias": ["Amoladoras", "Sierras", "Taladros"],
+    "imagenesPreview": [
+      "https://cdn.ferromax.com.ar/imgs/taladro-bosch-500w.jpg",
+      "https://cdn.ferromax.com.ar/imgs/amoladora-dewalt-750w.jpg"
+    ]
+  },
+  {
+    "nombre": "Fijaciones",
+    "totalProductos": 212,
+    "subcategorias": ["Bulones", "Tornillos", "Tuercas"],
+    "imagenesPreview": []
+  }
+]
+```
+
+<Note>
+  The `nombre` field is the exact string you must pass as the `categoria` query parameter when filtering products. Matching is case-sensitive on the server side.
+</Note>
+
+---
+
+## Paginated Product Catalog
+
+### GET /api/categorias/productos
+
+Returns a paginated list of public-facing products. Optionally filters by category name, subcategory name, or both. This is the primary data source for the Tienda `/tienda` route.
+
+**Authentication:** None — public endpoint.
+
+<ParamField query="categoria" type="string">
+  Filter products to a specific category by its `nombre`. Must match exactly (case-sensitive). Omit to return products across all categories.
+</ParamField>
+
+<ParamField query="subcategoria" type="string">
+  Further narrow results to a specific subcategory within the selected category. Has no effect if `categoria` is not also provided.
+</ParamField>
+
+<ParamField query="page" type="integer" default="0">
+  Zero-based page index. Use in combination with `size` to paginate through the full result set.
+</ParamField>
+
+<ParamField query="size" type="integer" default="24">
+  Number of products per page. The default of `24` maps to a 4 × 6 grid in the standard storefront layout.
+</ParamField>
+
+<ResponseField name="contenido" type="array of ProductoCatalogoDTO">
+  The products on the requested page.
+</ResponseField>
+
+<ResponseField name="contenido[].id" type="integer (Long)">
+  Unique product identifier.
+</ResponseField>
+
+<ResponseField name="contenido[].sku" type="string">
+  Internal SKU code, e.g. `"TALAD-BOSCH-500"`.
+</ResponseField>
+
+<ResponseField name="contenido[].nombre" type="string">
+  Product display name.
+</ResponseField>
+
+<ResponseField name="contenido[].marca" type="string">
+  Brand name.
+</ResponseField>
+
+<ResponseField name="contenido[].precio" type="number (BigDecimal)">
+  Public selling price in ARS. This is the `precioVenta`; cost price is never exposed by this endpoint.
+</ResponseField>
+
+<ResponseField name="contenido[].stockActual" type="integer">
+  Current stock quantity.
+</ResponseField>
+
+<ResponseField name="contenido[].disponibilidad" type="string">
+  Human-readable availability label derived from stock. Typically `"Disponible"`, `"Últimas unidades"`, or `"Sin stock"`.
+</ResponseField>
+
+<ResponseField name="contenido[].imagenUrl" type="string | null">
+  Primary product image URL. `null` if no image has been assigned.
+</ResponseField>
+
+<ResponseField name="contenido[].nombreCategoria" type="string">
+  Category name this product belongs to.
+</ResponseField>
+
+<ResponseField name="contenido[].subcategoria" type="string | null">
+  Subcategory label, or `null` if the product has no subcategory.
+</ResponseField>
+
+<ResponseField name="paginaActual" type="integer">
+  The zero-based index of the current page, echoing the `page` parameter.
+</ResponseField>
+
+<ResponseField name="totalPaginas" type="integer">
+  Total number of pages available given the current `size` and filter criteria.
+</ResponseField>
+
+<ResponseField name="totalElementos" type="integer (long)">
+  Total number of products matching the filter criteria across all pages.
+</ResponseField>
+
+```bash
+curl 'http://localhost:8081/api/categorias/productos?categoria=Herramientas+Eléctricas&page=0&size=24'
+```
+
+```json
+{
+  "contenido": [
+    {
+      "id": 42,
+      "sku": "TALAD-BOSCH-500",
+      "nombre": "Taladro Bosch 500W",
+      "marca": "Bosch",
+      "precio": 89999.99,
+      "stockActual": 12,
+      "disponibilidad": "Disponible",
+      "imagenUrl": "https://cdn.ferromax.com.ar/imgs/taladro-bosch-500w.jpg",
+      "nombreCategoria": "Herramientas Eléctricas",
+      "subcategoria": "Taladros"
+    },
+    {
+      "id": 57,
+      "sku": "AMOL-DEWALT-750",
+      "nombre": "Amoladora Dewalt 750W",
+      "marca": "Dewalt",
+      "precio": 124500.00,
+      "stockActual": 2,
+      "disponibilidad": "Últimas unidades",
+      "imagenUrl": "https://cdn.ferromax.com.ar/imgs/amoladora-dewalt-750w.jpg",
+      "nombreCategoria": "Herramientas Eléctricas",
+      "subcategoria": "Amoladoras"
+    }
+  ],
+  "paginaActual": 0,
+  "totalPaginas": 2,
+  "totalElementos": 48
+}
+```
+
+When no products match the given filters the service returns an empty page rather than an error:
+
+```json
+{
+  "contenido": [],
+  "paginaActual": 0,
+  "totalPaginas": 0,
+  "totalElementos": 0
+}
+```
+
+<Note>
+  The catalog response is cached using **Caffeine** (`maximumSize=500`, `expireAfterWrite=600s`). Changes to products — price updates, new images, stock adjustments — may take up to **10 minutes** to appear in catalog responses. For immediate visibility after an admin edit, restart the application or wait for the cache TTL to expire.
+</Note>
+
+---
+
+## Featured Products (Flat List)
+
+### GET /api/productos/publico
+
+Returns all public-facing products as a flat, unpaginated list. Used by the Tienda home page to render the featured / "más vendidos" section. Because this response omits cost price and supplier information, it is safe to expose without authentication.
+
+**Authentication:** None — public endpoint.
+
+<ResponseField name="[]" type="array of ProductoPublicoDTO">
+  All active products visible to the public storefront.
+</ResponseField>
+
+<ResponseField name="[].id" type="integer (Long)">
+  Unique product identifier.
+</ResponseField>
+
+<ResponseField name="[].nombre" type="string">
+  Product display name.
+</ResponseField>
+
+<ResponseField name="[].precio" type="number (BigDecimal)">
+  Public selling price in ARS.
+</ResponseField>
+
+<ResponseField name="[].stockActual" type="integer">
+  Current stock quantity.
+</ResponseField>
+
+<ResponseField name="[].imagenUrl" type="string | null">
+  Primary product image URL. `null` if no image has been assigned.
+</ResponseField>
+
+<ResponseField name="[].nombreCategoria" type="string">
+  Category name this product belongs to.
+</ResponseField>
+
+```bash
+curl http://localhost:8081/api/productos/publico
+```
+
+```json
+[
+  {
+    "id": 42,
+    "nombre": "Taladro Bosch 500W",
+    "precio": 89999.99,
+    "stockActual": 12,
+    "imagenUrl": "https://cdn.ferromax.com.ar/imgs/taladro-bosch-500w.jpg",
+    "nombreCategoria": "Herramientas Eléctricas"
+  },
+  {
+    "id": 105,
+    "nombre": "Cinta métrica 5m Stanley",
+    "precio": 4200.00,
+    "stockActual": 0,
+    "imagenUrl": null,
+    "nombreCategoria": "Medición"
+  }
+]
+```
+
+<Warning>
+  This endpoint returns every active product in a single response and is not paginated. For large catalogs (hundreds of SKUs) prefer `GET /api/categorias/productos` with pagination to avoid transferring unnecessary data on the home page initial load.
+</Warning>

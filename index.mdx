@@ -1,20 +1,66 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "Ferromax ERP: Hardware Store Management System"
+sidebarTitle: "Home"
+description: "Ferromax ERP is a full-stack management system for hardware stores, featuring a POS terminal, inventory management, supplier invoicing with OCR, and a public e-commerce storefront."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+Ferromax ERP is an integrated management platform built for Argentine hardware stores (*ferreterías*). It combines a Spring Boot REST API backend with a React frontend to deliver a point-of-sale terminal, real-time inventory tracking, automated invoice processing, and a consumer-facing online store — all in a single cohesive system.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get Ferromax ERP running locally in under 10 minutes with PostgreSQL, Maven, and Node.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Understand the full-stack structure: Spring Boot backend, React frontend, JWT auth, and WebSocket layer.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore every REST endpoint with request/response schemas, auth requirements, and curl examples.
+  </Card>
+  <Card title="User Roles" icon="users" href="/roles/overview">
+    Learn how Admin, Empleado, and Cliente roles map to features and API access.
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## Core Modules
+
+<CardGroup cols={3}>
+  <Card title="Dashboard" icon="chart-bar" href="/modules/dashboard">
+    KPI cards, weekly sales charts, and real-time stock alerts for admins.
+  </Card>
+  <Card title="POS Terminal" icon="cash-register" href="/modules/pos">
+    Barcode-scanner workflow for fast in-store sales processing.
+  </Card>
+  <Card title="Inventory" icon="boxes-stacked" href="/modules/inventory">
+    Remito-based goods receipt, manual stock adjustments, and movement audit trail.
+  </Card>
+  <Card title="Storefront" icon="store" href="/modules/storefront">
+    Public e-commerce catalog with cart, checkout, and order tracking.
+  </Card>
+  <Card title="Invoice Scanning" icon="file-invoice" href="/modules/invoicing">
+    Upload supplier invoices as PDF or image — OCR extracts line items automatically.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/environment">
+    Environment variables, database setup, JWT configuration, and CORS settings.
+  </Card>
+</CardGroup>
+
+## Get Started in 4 Steps
+
+<Steps>
+  <Step title="Set up PostgreSQL">
+    Create the `ferromax_db` database and configure credentials in `src/main/resources/application.properties`.
+  </Step>
+  <Step title="Start the backend">
+    Run `mvn spring-boot:run` from the project root. The API will be available at `http://localhost:8081/api`.
+  </Step>
+  <Step title="Start the frontend">
+    Run `npm install && npm run dev` from the `ferromax-web/` directory. The app opens at `http://localhost:5173`.
+  </Step>
+  <Step title="Log in">
+    Use the default admin credentials (`jose@ferromax.com` / `admin123`) to access the dashboard, or the employee credentials (`manuel@ferromax.com` / `emp123`) to open the POS terminal.
+  </Step>
+</Steps>
+
+<Note>
+  Product images (~213 MB) are not included in the repository. Copy the contents of `img.zip` (available from the development team) into `ferromax-web/public/img/` before starting the frontend.
+</Note>

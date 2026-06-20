@@ -1,0 +1,140 @@
+---
+title: "JWT Authentication and Spring Security Configuration"
+sidebarTitle: "Security"
+description: "Configure JWT token expiration, secret key, CORS allowed origins, and understand Ferromax ERP's stateless Spring Security filter chain."
+---
+
+Ferromax ERP uses **stateless JWT-based authentication** managed by Spring Security. Every request to a protected endpoint must carry a valid JSON Web Token in the `Authorization: Bearer <token>` header. The frontend stores this token in `localStorage` under the key `ferromax_token` and attaches it automatically via an Axios request interceptor in `axiosClient.js`. This page covers the JWT configuration properties, CORS setup, and the security filter chain decisions you need to understand before deploying to production.
+
+## JWT Properties
+
+Two distinct JWT property groups exist in `application.properties`. The `app.jwt.*` group is consumed by the authentication service layer (token issuance and refresh). The `jwt.*` group is consumed directly by `JwtTokenProvider.java`, which validates incoming tokens on every protected request.
+
+| Property | Default | Description |
+|---|---|---|
+| `app.jwt.secret` | `c2VjcmV0b0ZlcnJvbWF4RVJQQ2xhdmVTdXBlclNlY3JldGEyMDI0IUAj` | Base64-encoded HMAC signing key used by the authentication service layer. **Must be replaced in production.** |
+| `app.jwt.expiration-ms` | `86400000` (24 hours) | Lifetime of an access token issued on login. After this period the client must re-authenticate or use a refresh token. |
+| `app.jwt.refresh-expiration-ms` | `604800000` (7 days) | Lifetime of a refresh token. Clients may exchange a valid refresh token for a new access token without re-entering credentials. |
+| `jwt.secret` | `ferromax-clave-secreta-muy-larga-2024` | Plain-text HMAC secret read by `JwtTokenProvider` to sign and verify tokens at the filter layer. **Must be replaced in production.** |
+| `jwt.expiration` | `28800000` (8 hours) | Token expiration enforced by `JwtTokenProvider` when generating tokens directly (e.g., in token refresh flows). |
+
+### Token Claims
+
+`JwtTokenProvider.generarToken()` embeds the following claims into every issued JWT:
+
+| Claim | Source | Description |
+|---|---|---|
+| `sub` (subject) | User email | Used to look up the `UserDetails` on each request. |
+| `rol` | User role string | The user's role (e.g., `ROLE_ADMIN`, `ROLE_EMPLEADO`, `ROLE_CLIENTE`). |
+| `usuarioId` | User primary key (`Long`) | The database ID of the authenticated user, available to controllers via token parsing. |
+| `iat` | Issued-at timestamp | Set automatically at the moment of token generation. |
+| `exp` | Expiration timestamp | Derived from `jwt.expiration`. The filter rejects any token past this time. |
+
+## Changing the JWT Secret for Production
+
+<Warning>
+  Both default secret values (`app.jwt.secret` and `jwt.secret`) in `application.properties` are **publicly known example values** — they appear in this documentation and in the repository. Any attacker who knows the secret can forge valid tokens for any user, including admins.
+
+  Before any production deployment, replace both secrets with cryptographically random values:
+
+  ```bash
+  # Generate a 256-bit (32-byte) base64 secret — run twice, use each output for one property
+  openssl rand -base64 32
+  ```
+
+  Then set them via environment variables rather than hardcoding them:
+
+  ```properties
+  app.jwt.secret=${APP_JWT_SECRET}
+  jwt.secret=${JWT_SECRET}
+  ```
+</Warning>
+
+## CORS Configuration
+
+CORS is handled centrally in `SecurityConfig.java` through a `CorsConfigurationSource` bean. The allowed origins are the three Vite dev-server ports used during local development, each with both `localhost` and `127.0.0.1` variants:
+
+```java
+config.setAllowedOrigins(List.of(
+    "http://localhost:5173", "http://127.0.0.1:5173",
+    "http://localhost:5174", "http://127.0.0.1:5174",
+    "http://localhost:5175", "http://127.0.0.1:5175"
+));
+config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+config.setAllowedHeaders(List.of("*"));
+config.setAllowCredentials(true);
+```
+
+| Setting | Value | Description |
+|---|---|---|
+| `allowedOrigins` | Six localhost variants | Only these origins may make cross-origin requests. Must be updated for production. |
+| `allowedMethods` | `GET, POST, PUT, PATCH, DELETE, OPTIONS` | All standard REST methods plus the required preflight `OPTIONS`. |
+| `allowedHeaders` | `*` | Any request header is accepted, including `Authorization` for JWT and `Content-Type`. |
+| `allowCredentials` | `true` | Permits cookies and the `Authorization` header to be included in cross-origin requests. Required for JWT bearer token delivery. |
+
+<Warning>
+  For production, replace the localhost origin list in `SecurityConfig.java` with the actual deployed frontend URL (e.g., `https://ferromax.example.com`). Using wildcard origins with `allowCredentials=true` is not permitted by the CORS spec and will be blocked by browsers.
+</Warning>
+
+## Security Filter Chain
+
+The `SecurityFilterChain` bean in `SecurityConfig.java` defines the following behavior for every incoming HTTP request:
+
+<Steps>
+  <Step title="CSRF disabled">
+    `AbstractHttpConfigurer::disable` turns off CSRF protection. This is safe for stateless REST APIs because there are no session cookies to hijack — authentication relies entirely on the `Authorization` header, which browser-based CSRF attacks cannot forge across origins.
+  </Step>
+  <Step title="CORS applied">
+    The `CorsConfigurationSource` bean is applied before any authorization check, so preflight `OPTIONS` requests are answered correctly without requiring authentication.
+  </Step>
+  <Step title="Session policy: STATELESS">
+    `SessionCreationPolicy.STATELESS` instructs Spring Security never to create or consult an `HttpSession`. Every request is authenticated independently from its JWT.
+  </Step>
+  <Step title="401 on unauthenticated requests">
+    A custom `AuthenticationEntryPoint` returns HTTP **401 Unauthorized** (with body `"No autenticado"`) when a protected endpoint is accessed without a valid token. Spring Security's default behavior of issuing a **302 redirect to a login page** is suppressed — inappropriate for an API consumed by a JavaScript frontend.
+  </Step>
+  <Step title="JWT filter injected">
+    `JwtAuthenticationFilter` is inserted before `UsernamePasswordAuthenticationFilter`. It reads the `Authorization: Bearer` header, validates the token via `JwtTokenProvider`, and populates the `SecurityContext` before any authorization decision is made.
+  </Step>
+  <Step title="Method-level security enabled">
+    `@EnableMethodSecurity` activates `@PreAuthorize` annotations on controller and service methods, allowing fine-grained role checks beyond what is declared in the filter chain.
+  </Step>
+</Steps>
+
+## Public Endpoints
+
+The following endpoints are declared with `.permitAll()` and require no `Authorization` header:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/auth/login` | Exchange email + password for a JWT access token. |
+| `POST` | `/auth/register` | Create a new customer account. |
+| `GET` | `/productos/publico` | Browse the public product catalog (no pricing or supplier data). |
+| `GET` | `/categorias/**` | Retrieve the full category tree or a specific category by ID. |
+| `GET` | `/img/**` | Serve product images from the local `./img/` filesystem directory. |
+
+All other routes require a valid, non-expired JWT. Role-specific restrictions (`ADMIN`, `EMPLEADO`, `CLIENTE`) are enforced by additional `hasRole()` / `hasAnyRole()` matchers defined in the filter chain.
+
+## Password Encoding
+
+All user passwords are hashed with **BCrypt** before being stored in the database. The `BCryptPasswordEncoder` bean in `SecurityConfig.java` is used both when creating accounts and when verifying credentials at login.
+
+```java
+@Bean
+public PasswordEncoder passwordEncoder() {
+    return new BCryptPasswordEncoder();
+}
+```
+
+BCrypt embeds the salt in the hash itself, so no separate salt column is required. Never store or log plain-text passwords at any point in the application.
+
+<Note>
+  The default user accounts seeded by `DataInitializer.java` on first startup are:
+
+  | Email | Password | Role |
+  |---|---|---|
+  | `jose@ferromax.com` | `admin123` | `ADMIN` |
+  | `manuel@ferromax.com` | `emp123` | `EMPLEADO` |
+
+  These credentials are well-known from the source code. **Delete or change them before deploying to any environment accessible outside localhost.** You can do this by modifying `DataInitializer.java` or by updating the records directly in the database after the first run.
+</Note>

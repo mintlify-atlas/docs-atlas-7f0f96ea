@@ -1,0 +1,152 @@
+---
+title: "Real-time Stock Updates via WebSocket STOMP"
+sidebarTitle: "WebSocket"
+description: "Connect to the Ferromax ERP WebSocket endpoint to receive real-time stock update events when sales are processed or inventory is adjusted."
+---
+
+Ferromax ERP publishes real-time stock update events over WebSocket using the STOMP protocol with SockJS fallback. The frontend ERP dashboard subscribes to these events to refresh stock alerts and KPIs without polling — whenever a sale is completed or stock is adjusted, every connected client receives a lightweight event describing what changed. The server is built with Spring WebSocket (`@EnableWebSocketMessageBroker`) and an in-memory simple broker.
+
+---
+
+## Connection Details
+
+| Property | Value |
+|---|---|
+| SockJS endpoint | `http://localhost:8081/api/ws` |
+| Protocol | STOMP over SockJS |
+| Topic prefix | `/topic` |
+| Application destination prefix | `/app` |
+| Server port | `8081` (configured via `server.port`) |
+| Context path | `/api` (configured via `server.servlet.context-path`) |
+
+The SockJS transport negotiates WebSocket, HTTP streaming, or long-polling automatically based on what the client and network support. In browsers that support native WebSockets the connection upgrades immediately; SockJS is the fallback for environments that block WebSocket upgrades (e.g. some corporate proxies).
+
+---
+
+## Subscribing to Stock Updates
+
+Use the `@stomp/stompjs` client (v7) with `sockjs-client` to connect and subscribe to the `/topic/stock-update` destination. The `onConnect` callback fires after the STOMP handshake completes — subscribe to topics only inside this callback.
+
+```javascript
+import { Client } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
+
+const client = new Client({
+  webSocketFactory: () => new SockJS('http://localhost:8081/api/ws'),
+  onConnect: () => {
+    client.subscribe('/topic/stock-update', (message) => {
+      const event = JSON.parse(message.body);
+      console.log('Stock update:', event);
+      // refresh dashboard KPIs or alert badge here
+    });
+  },
+  onStompError: (frame) => {
+    console.error('STOMP error:', frame.headers['message']);
+  },
+});
+
+client.activate();
+```
+
+To disconnect cleanly when your component unmounts (e.g. in a React `useEffect` cleanup):
+
+```javascript
+return () => {
+  client.deactivate();
+};
+```
+
+---
+
+## Stock Update Event Shape
+
+Each message published to `/topic/stock-update` carries a `StockUpdateEvent` serialized as JSON. The event is intentionally minimal — it identifies the product and its new stock level so subscribers can decide locally whether to re-fetch alert data.
+
+<ResponseField name="productoId" type="integer (Long)">
+  The unique ID of the product whose stock changed.
+</ResponseField>
+
+<ResponseField name="sku" type="string">
+  The product's SKU code, e.g. `"TALAD-BOSCH-500"`. Useful for correlating the event with locally cached catalog data without an extra lookup.
+</ResponseField>
+
+<ResponseField name="stockActual" type="integer">
+  The product's stock quantity **after** the triggering operation was applied.
+</ResponseField>
+
+```json
+{
+  "productoId": 42,
+  "sku": "TALAD-BOSCH-500",
+  "stockActual": 3
+}
+```
+
+<Note>
+  The event carries the **post-operation** stock value only. If you need the previous stock level (e.g. to animate a decrement counter), store the last known value in your component state and compare on receipt.
+</Note>
+
+---
+
+## When Events Are Published
+
+A `StockUpdateEvent` is broadcast to `/topic/stock-update` whenever any of the following operations mutate product stock:
+
+- **Sale registered** — a call to `POST /api/ventas` completes successfully and stock is decremented for each sold item.
+- **Stock adjustment applied** — a call to `POST /api/ajustes-stock` is processed (manual correction by an admin or employee).
+- **Remito confirmed** — an admin confirms a supplier delivery note via `PATCH /api/recepciones-remito/{id}/confirmar`, increasing stock for received items.
+- **Direct goods receipt processed** — a call to `POST /api/recepcion` registers a direct inventory intake.
+
+In all cases the event is emitted after the database transaction commits, so `stockActual` in the event is the durable value.
+
+---
+
+## Allowed Origins
+
+The `WebSocketConfig` registers the `/ws` SockJS endpoint. The allowed origins are controlled by the `app.websocket.allowed-origins` property in `application.properties`. The default development configuration permits:
+
+```
+http://localhost:3000
+http://localhost:4200
+http://localhost:5173
+http://localhost:5174
+http://localhost:5175
+```
+
+<Warning>
+  The current `WebSocketConfig.java` uses `setAllowedOriginPatterns("*")`, which overrides the property list and permits connections from **any** origin. Before deploying to production, replace the wildcard with an explicit list of your production domain(s) to prevent unauthorized clients from subscribing to stock events.
+</Warning>
+
+To restrict origins in production, update `application.properties`:
+
+```properties
+app.websocket.allowed-origins=https://tienda.ferromax.com.ar,https://erp.ferromax.com.ar
+```
+
+And update `WebSocketConfig.java` to read the property instead of using the wildcard pattern:
+
+```java
+@Value("${app.websocket.allowed-origins}")
+private String[] allowedOrigins;
+
+@Override
+public void registerStompEndpoints(StompEndpointRegistry registry) {
+    registry.addEndpoint("/ws")
+            .setAllowedOrigins(allowedOrigins)
+            .withSockJS();
+}
+```
+
+---
+
+## Authentication
+
+The WebSocket SockJS endpoint (`/api/ws`) is currently **public** — no JWT token is required to establish a connection. Topic subscriptions are also public: `StockUpdateEvent` messages are broadcast to all connected clients regardless of their authentication status.
+
+This is intentional for the Tienda storefront (which needs real-time availability updates without requiring a login), but means **internal stock data is visible to any connected browser tab**.
+
+If you need to restrict stock events to authenticated ERP users only, add a `ChannelInterceptor` to the inbound channel that validates the `Authorization` STOMP header against the JWT filter chain. See the [Spring Security WebSocket documentation](https://docs.spring.io/spring-security/reference/servlet/integrations/websocket.html) for implementation guidance.
+
+<Tip>
+  The Ferromax frontend (`ferromax-web`) uses `@stomp/stompjs` **v7** and `sockjs-client` **v1.6**. The live connection and reconnection logic are implemented in `DashboardPage.jsx`, while the alert panel that reacts to incoming events is `AlertaStockPanel.jsx`. Both are good references for idiomatic usage in a React context.
+</Tip>

@@ -1,0 +1,289 @@
+---
+title: "Sales API: Register and Manage Transactions"
+sidebarTitle: "Sales"
+description: "REST endpoints for sales operations in Ferromax ERP. Register POS and web sales, retrieve transaction history, view sales details, and void transactions."
+---
+
+The `/ventas` endpoints handle all sales transactions — both in-store POS sales and online Tienda orders. The sale origin (`POS` vs `WEB`) is set automatically based on the caller's role: a `CLIENTE` token produces a `WEB` origin, while `ADMIN` or `EMPLEADO` tokens produce a `POS` origin. The `cajeroId` is always extracted from the JWT; callers never supply it directly.
+
+---
+
+## POST /api/ventas
+
+Registers a new sale and decrements stock for each item in the transaction.
+
+**Auth:** `ADMIN`, `EMPLEADO`, or `CLIENTE`
+
+### Request Body (`VentaRequest`)
+
+<ParamField body="medioPago" type="string" required>
+  Payment method. Must be one of the `MedioPagoEnum` values listed below.
+</ParamField>
+
+<ParamField body="items" type="array" required>
+  List of line items. Must contain at least one entry.
+
+  <Expandable title="ItemVentaRequest fields">
+    <ParamField body="productoId" type="Long" required>
+      ID of the product to sell.
+    </ParamField>
+    <ParamField body="cantidad" type="Integer" required>
+      Quantity to sell. Minimum `1`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="clienteId" type="Long">
+  Optional ID of the customer. Required for `WEB` sales when linking to a customer account; omit for anonymous POS transactions.
+</ParamField>
+
+### Response `201 Created`
+
+Returns a `VentaDetalleResponse`.
+
+<ResponseField name="id" type="Long">
+  Internal sale identifier.
+</ResponseField>
+
+<ResponseField name="fecha" type="OffsetDateTime">
+  Timestamp of the transaction in ISO-8601 format with timezone offset (Argentina/Buenos Aires, `UTC-3`).
+</ResponseField>
+
+<ResponseField name="subtotal" type="BigDecimal">
+  Sum of all line item subtotals before discounts.
+</ResponseField>
+
+<ResponseField name="descuento" type="BigDecimal">
+  Total discount applied to the sale.
+</ResponseField>
+
+<ResponseField name="total" type="BigDecimal">
+  Final amount charged after discounts.
+</ResponseField>
+
+<ResponseField name="estado" type="string">
+  Current sale state. One of `COMPLETADA`, `ANULADA`, `PENDIENTE`.
+</ResponseField>
+
+<ResponseField name="medioPago" type="string">
+  Payment method used.
+</ResponseField>
+
+<ResponseField name="nombreCajero" type="string">
+  Full name of the employee or admin who processed the sale.
+</ResponseField>
+
+<ResponseField name="origen" type="string">
+  Sale channel: `POS` (in-store) or `WEB` (online Tienda).
+</ResponseField>
+
+<ResponseField name="comprobanteId" type="Long">
+  ID of the associated fiscal receipt record. May be `null` if receipt generation is pending.
+</ResponseField>
+
+<ResponseField name="items" type="array">
+  Line items included in the sale.
+
+  <Expandable title="ItemVentaResponse fields">
+    <ResponseField name="productoId" type="Long">
+      ID of the sold product.
+    </ResponseField>
+    <ResponseField name="sku" type="string">
+      SKU of the sold product.
+    </ResponseField>
+    <ResponseField name="nombreProducto" type="string">
+      Product display name at time of sale.
+    </ResponseField>
+    <ResponseField name="cantidad" type="Integer">
+      Units sold.
+    </ResponseField>
+    <ResponseField name="precioUnitario" type="BigDecimal">
+      Unit price at time of sale.
+    </ResponseField>
+    <ResponseField name="subtotal" type="BigDecimal">
+      Line subtotal (`precioUnitario × cantidad`).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST http://localhost:8081/api/ventas \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "medioPago": "EFECTIVO",
+    "items": [
+      { "productoId": 12, "cantidad": 2 },
+      { "productoId": 47, "cantidad": 1 }
+    ]
+  }'
+```
+
+---
+
+## GET /api/ventas
+
+Lists all sales within a date range. Defaults to the last 30 days when no parameters are supplied. Dates are interpreted in the `America/Argentina/Buenos_Aires` timezone.
+
+**Auth:** `ADMIN`
+
+### Query Parameters
+
+<ParamField query="desde" type="date">
+  Start date in ISO-8601 format (`YYYY-MM-DD`). Inclusive. Defaults to 30 days before today.
+</ParamField>
+
+<ParamField query="hasta" type="date">
+  End date in ISO-8601 format (`YYYY-MM-DD`). Inclusive. Defaults to today.
+</ParamField>
+
+### Response `200 OK`
+
+Returns an array of `VentaResponse`.
+
+<ResponseField name="id" type="Long">
+  Internal sale identifier.
+</ResponseField>
+
+<ResponseField name="fecha" type="OffsetDateTime">
+  Transaction timestamp (ISO-8601 with timezone offset).
+</ResponseField>
+
+<ResponseField name="total" type="BigDecimal">
+  Final charged amount.
+</ResponseField>
+
+<ResponseField name="estado" type="string">
+  Sale state: `COMPLETADA`, `ANULADA`, or `PENDIENTE`.
+</ResponseField>
+
+<ResponseField name="medioPago" type="string">
+  Payment method used.
+</ResponseField>
+
+<ResponseField name="nombreCajero" type="string">
+  Name of the employee who processed the sale.
+</ResponseField>
+
+<ResponseField name="cantidadItems" type="Integer">
+  Total number of line items in the sale.
+</ResponseField>
+
+<ResponseField name="origen" type="string">
+  Sale channel: `POS` or `WEB`.
+</ResponseField>
+
+```bash
+curl 'http://localhost:8081/api/ventas?desde=2025-01-01&hasta=2025-01-31' \
+  -H 'Authorization: Bearer <token>'
+```
+
+---
+
+## GET /api/ventas/mis-compras
+
+Returns the authenticated customer's complete online order history. Only sales with `origen = WEB` linked to the caller's user ID are returned.
+
+**Auth:** `CLIENTE`
+
+### Response `200 OK`
+
+Returns an array of `VentaResponse` filtered to the caller's `userId`. See [GET /api/ventas](#get-apiventas) for field descriptions.
+
+---
+
+## GET /api/ventas/mis-ventas-hoy
+
+Returns all sales processed by the authenticated employee during the current calendar day (Argentina timezone).
+
+**Auth:** `EMPLEADO`
+
+### Response `200 OK`
+
+Returns an array of `VentaResponse` filtered to today's sales for the calling employee.
+
+---
+
+## GET /api/ventas/\{id\}
+
+Returns summary information for a single sale.
+
+**Auth:** `ADMIN` or `EMPLEADO`
+
+### Path Parameters
+
+<ParamField path="id" type="Long" required>
+  Internal sale identifier.
+</ParamField>
+
+### Response `200 OK`
+
+Returns a `VentaResponse`.
+
+---
+
+## GET /api/ventas/\{id\}/detalle
+
+Returns the full details of a single sale, including the complete line-item list with product names, quantities, and per-unit prices.
+
+**Auth:** `ADMIN` or `EMPLEADO`
+
+### Path Parameters
+
+<ParamField path="id" type="Long" required>
+  Internal sale identifier.
+</ParamField>
+
+### Response `200 OK`
+
+Returns a `VentaDetalleResponse`. See [POST /api/ventas](#post-apiventas) for full field descriptions.
+
+---
+
+## PUT /api/ventas/\{id\}/anular
+
+Voids a sale by changing its `estado` to `ANULADA`. The sale record is retained for audit purposes.
+
+**Auth:** `ADMIN`
+
+### Path Parameters
+
+<ParamField path="id" type="Long" required>
+  Internal sale identifier.
+</ParamField>
+
+### Response `200 OK`
+
+Returns the updated `VentaResponse` with `estado: "ANULADA"`.
+
+<Warning>
+  Voiding a sale does **not** automatically reverse the stock change. If stock needs to be restored, perform a manual stock adjustment via [POST /api/ajustes-stock](/api/inventario#post-apiajustes-stock) after voiding.
+</Warning>
+
+---
+
+## Reference: Enumerations
+
+### `MedioPagoEnum` — Payment Methods
+
+| Value | Description |
+|---|---|
+| `EFECTIVO` | Cash payment |
+| `DEBITO` | Debit card |
+| `CREDITO` | Credit card |
+| `MERCADOPAGO` | MercadoPago digital wallet |
+
+### `EstadoVentaEnum` — Sale States
+
+| Value | Description |
+|---|---|
+| `PENDIENTE` | Sale created but not yet fully processed (e.g. awaiting payment confirmation) |
+| `COMPLETADA` | Sale successfully finalised and stock decremented |
+| `ANULADA` | Sale voided by an admin; stock is **not** automatically restored |
+
+### `OrigenVentaEnum` — Sale Channel
+
+| Value | Description |
+|---|---|
+| `POS` | In-store sale processed by an `ADMIN` or `EMPLEADO` |
+| `WEB` | Online order placed by a `CLIENTE` through the Tienda storefront |

@@ -1,0 +1,277 @@
+---
+title: "Authenticate with Ferromax ERP API"
+sidebarTitle: "Authentication"
+description: "Obtain a JWT token via POST /auth/login, register new customer accounts with POST /auth/register, and retrieve the current user with GET /auth/me."
+---
+
+Ferromax ERP uses JWT Bearer tokens for authentication. Obtain a token by posting credentials to `/auth/login`, then include it in the `Authorization` header of every subsequent request. Tokens are signed with HMAC-SHA and carry the user's email, role, and internal ID as claims.
+
+---
+
+## POST /auth/login
+
+Authenticates a registered, active user and returns a signed JWT access token along with the user's role and display name.
+
+**Auth:** None required
+
+### Request body
+
+<ParamField body="email" type="string" required>
+  The registered email address of the user. Must be a valid email format.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The account password in plaintext. Compared against the BCrypt hash stored in the database.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X POST http://localhost:8081/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "jose@ferromax.com", "password": "admin123"}'
+```
+
+### Response 200 — Success
+
+<ResponseField name="token" type="string">
+  Signed JWT access token. Include this value as `Bearer <token>` in the `Authorization` header of all subsequent requests. Valid for **8 hours** (28 800 000 ms) by default.
+</ResponseField>
+
+<ResponseField name="rol" type="string">
+  The user's assigned role. One of `ADMIN`, `EMPLEADO`, or `CLIENTE`.
+</ResponseField>
+
+<ResponseField name="nombre" type="string">
+  The user's first name, suitable for display in the UI.
+</ResponseField>
+
+<ResponseField name="mensaje" type="string">
+  Human-readable success confirmation. Always `"Login exitoso"` on HTTP 200.
+</ResponseField>
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9...",
+  "rol": "ADMIN",
+  "nombre": "José",
+  "mensaje": "Login exitoso"
+}
+```
+
+### Response 401 — Invalid credentials
+
+Returned when the email is not found, the account is inactive (`activo = false`), or the password does not match.
+
+```json
+{
+  "error": "UNAUTHORIZED",
+  "mensaje": "Credenciales inválidas"
+}
+```
+
+<Warning>
+  Accounts with `activo = false` are treated as non-existent. The login endpoint uses `findByEmailAndActivoTrue`, so disabled users always receive a 401 — not a 403.
+</Warning>
+
+---
+
+## POST /auth/register
+
+Registers a new customer account. All self-registered users are automatically assigned the `CLIENTE` role — staff accounts with `ADMIN` or `EMPLEADO` roles must be provisioned directly in the database.
+
+**Auth:** None required
+
+### Request body
+
+<ParamField body="nombre" type="string" required>
+  The user's first name. Maximum 100 characters.
+</ParamField>
+
+<ParamField body="apellido" type="string">
+  The user's last name. Maximum 100 characters. Optional.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Email address for the new account. Must be a valid email format, maximum 150 characters, and **unique** across all users.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Plaintext password. Minimum 6 characters. Stored as a BCrypt hash — never logged or returned.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X POST http://localhost:8081/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Valentina",
+    "apellido": "Ríos",
+    "email": "valentina@example.com",
+    "password": "segura123"
+  }'
+```
+
+### Response 201 — Created
+
+```json
+{
+  "mensaje": "Usuario registrado exitosamente"
+}
+```
+
+### Response 400 — Email already registered
+
+Returned when the submitted email already exists in the `usuarios` table.
+
+```json
+{
+  "error": "BAD_REQUEST",
+  "mensaje": "El email 'valentina@example.com' ya está registrado"
+}
+```
+
+<Note>
+  After registering, the user must call `POST /auth/login` to obtain a token. The register endpoint does not return a JWT.
+</Note>
+
+---
+
+## GET /auth/me
+
+Returns the full profile of the currently authenticated user by extracting the email claim from the submitted JWT, then fetching the latest data from the database.
+
+**Auth:** Bearer token required
+
+### Request
+
+No request body. The token is read from the `Authorization` header.
+
+```text
+Authorization: Bearer <token>
+```
+
+### Example request
+
+```bash
+curl http://localhost:8081/api/auth/me \
+  -H "Authorization: Bearer <token>"
+```
+
+### Response 200 — User profile
+
+<ResponseField name="id" type="Long">
+  The user's internal numeric ID in the database.
+</ResponseField>
+
+<ResponseField name="nombre" type="string">
+  The user's first name.
+</ResponseField>
+
+<ResponseField name="apellido" type="string">
+  The user's last name.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  The user's email address.
+</ResponseField>
+
+<ResponseField name="rol" type="string">
+  The user's current role: `ADMIN`, `EMPLEADO`, or `CLIENTE`.
+</ResponseField>
+
+```json
+{
+  "id": 7,
+  "nombre": "José",
+  "apellido": "García",
+  "email": "jose@ferromax.com",
+  "rol": "ADMIN"
+}
+```
+
+### Response 401 — Missing or invalid token
+
+```json
+{
+  "error": "UNAUTHORIZED",
+  "mensaje": "No autenticado"
+}
+```
+
+---
+
+## Using Tokens in Requests
+
+After a successful login the frontend stores the token and attaches it automatically to every outgoing request via an Axios interceptor defined in `axiosClient.js`. The same pattern applies to any HTTP client you use outside the frontend.
+
+<Steps>
+  <Step title="Call POST /auth/login">
+    Post the user's email and password. On success, save the returned `token` string.
+  </Step>
+  <Step title="Store the token">
+    The React frontend persists the token in `localStorage` (key: `ferromax_token`) and exposes the authenticated user via `AuthContext.jsx`.
+  </Step>
+  <Step title="Attach the header">
+    Include `Authorization: Bearer <token>` in every request to a protected endpoint. The Axios client does this automatically via a request interceptor.
+  </Step>
+  <Step title="Handle 401 responses">
+    When the server returns `401`, the token has expired or been invalidated. The Axios response interceptor clears the stored token and redirects the user to `/login`.
+  </Step>
+</Steps>
+
+### Axios client interceptor (axiosClient.js)
+
+The following is the actual interceptor code from the Ferromax frontend. It reads the token from `localStorage` on every request and injects the `Authorization` header, and redirects to `/login` on any `401` response:
+
+```js
+import axios from 'axios'
+
+const axiosClient = axios.create({
+  baseURL: '/api',
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 15000,
+})
+
+// Adjunta el JWT en cada request si existe
+axiosClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('ferromax_token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+// Redirige al login cuando el servidor responde 401
+axiosClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('ferromax_token')
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
+  },
+)
+
+export default axiosClient
+```
+
+<Note>
+  Tokens expire after **8 hours** (28 800 000 ms), as set by `jwt.expiration` in `application.properties`. There is no refresh endpoint — the user must call `POST /auth/login` again to obtain a new token after expiry.
+</Note>
+
+### JWT token claims
+
+Every issued token contains the following custom claims in addition to standard JWT fields:
+
+| Claim | Type | Description |
+|---|---|---|
+| `sub` | String | The user's email address (subject) |
+| `rol` | String | The user's role (`ADMIN`, `EMPLEADO`, `CLIENTE`) |
+| `usuarioId` | Long | The user's internal database ID |
+| `iat` | Date | Token issued-at timestamp |
+| `exp` | Date | Token expiration timestamp |
+
+You can inspect these claims by decoding the token at [jwt.io](https://jwt.io) or by calling `GET /auth/me` while the token is still valid.

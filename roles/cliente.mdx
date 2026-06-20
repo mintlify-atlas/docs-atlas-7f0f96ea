@@ -1,0 +1,90 @@
+---
+title: "Cliente Role: Online Store Access"
+sidebarTitle: "Cliente"
+description: "The Cliente role is assigned to all self-registered users. Clientes can browse the public catalog, place orders through the Tienda storefront, and view their own purchase history."
+---
+
+The `CLIENTE` role is automatically assigned when a user registers via `POST /auth/register`. Clients interact exclusively with the public Tienda (storefront) — they have no access to the internal ERP, POS terminal, or any administrative modules. The Tienda is a mobile-first e-commerce surface where customers browse hardware products by category, add items to a cart, and check out to create a web order.
+
+## Registration
+
+Any visitor can create a client account. No invitation or admin action is required. The `AuthController` always assigns `RolEnum.CLIENTE` regardless of what is in the request body.
+
+```bash
+curl -X POST http://localhost:8080/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Laura",
+    "apellido": "Gómez",
+    "email": "laura.gomez@gmail.com",
+    "password": "miPassword123"
+  }'
+```
+
+A successful registration returns `201 Created`:
+
+```json
+{
+  "mensaje": "Usuario registrado exitosamente"
+}
+```
+
+After registering, the client logs in via `POST /auth/login` to receive a JWT, then includes that token as `Authorization: Bearer <token>` on authenticated requests.
+
+<Note>
+  If the email is already in use, the API returns `400 Bad Request` with the message `El email 'laura.gomez@gmail.com' ya está registrado`. Email addresses must be unique across all user roles.
+</Note>
+
+## Client API Access
+
+Once authenticated, clients have access to the following endpoints:
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/ventas` | Place an online order — origin is automatically set to `OrigenVentaEnum.WEB` |
+| `GET` | `/ventas/mis-compras` | Retrieve the authenticated client's full web purchase history |
+| `POST` | `/pedidos` | Create a new order through the pedido flow |
+| `GET` | `/pedidos/mis-pedidos` | List the authenticated client's orders |
+
+The `origen` field on a sale is determined server-side based on the caller's role — clients cannot set it manually:
+
+```java
+// VentaController.java
+String rol = jwtTokenProvider.obtenerRolDesdeToken(token);
+OrigenVentaEnum origen = "CLIENTE".equals(rol) ? OrigenVentaEnum.WEB : OrigenVentaEnum.POS;
+```
+
+This ensures all client-placed orders are tagged as `WEB` origin for accurate sales channel reporting in the admin dashboard.
+
+## Storefront Features
+
+The Tienda is the client-facing surface of Ferromax ERP, accessible at `/tienda` in the React application. Clients can:
+
+- **Browse the product catalog** — categories are loaded from `GET /categorias/**` (public, no auth required) and products from `GET /productos/publico`
+- **Filter by category** — the `/catalogo/:categoria` route renders a filtered product grid
+- **Search products** — full-text search within the catalog
+- **Add to cart** — client-side cart state managed in the browser
+- **Checkout** — submitting the cart calls `POST /ventas` with the client's JWT, recording the order with `OrigenVentaEnum.WEB`
+- **View order confirmation** — the `/tienda/confirmacion` page displays the completed order summary
+- **View order history** — the `/tienda/mis-pedidos` page calls `GET /ventas/mis-compras` to list all past web purchases
+
+## Differences from Guest Browsing
+
+Unauthenticated visitors (guests) can already browse the catalog — the product and category endpoints are fully public:
+
+| Endpoint | Guest | Cliente |
+|---|---|---|
+| `GET /productos/publico` | ✅ Allowed | ✅ Allowed |
+| `GET /categorias/**` | ✅ Allowed | ✅ Allowed |
+| `POST /auth/register` | ✅ Allowed | ✅ Allowed |
+| `POST /auth/login` | ✅ Allowed | ✅ Allowed |
+| `POST /ventas` (place order) | ❌ 401 | ✅ Allowed |
+| `GET /ventas/mis-compras` | ❌ 401 | ✅ Allowed |
+| `POST /pedidos` | ❌ 401 | ✅ Allowed |
+| `GET /pedidos/mis-pedidos` | ❌ 401 | ✅ Allowed |
+
+A client account is required only to **place** an order or view order history. The storefront prompts users to log in or register at checkout if they are not already authenticated. The `/tienda/login` route handles this inline without redirecting away from the store.
+
+<Note>
+  Clients cannot access any ERP-internal routes — including the dashboard (`/`), POS terminal (`/pos`), product management (`/productos`), stock adjustments (`/ajuste-stock`), invoice scanner (`/ingreso-factura`), or remito management (`/remitos`). Attempting to reach any of these routes with a client JWT returns `HTTP 403 Forbidden` from the API and a redirect from the React `ProtectedRoute` guard on the frontend.
+</Note>

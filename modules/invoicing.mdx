@@ -1,0 +1,171 @@
+---
+title: "Supplier Invoice OCR: Automated Stock Ingestion"
+sidebarTitle: "Invoice Scanning"
+description: "Upload supplier invoices as PDF or image files. Ferromax ERP uses OCR to extract line items, match products by code, and create stock receipts with admin confirmation."
+---
+
+The invoice scanning module lets admins upload a supplier invoice (PDF or image) and have Ferromax ERP automatically extract product codes, quantities, and unit prices using OCR — eliminating manual data entry for high-volume stock ingestion. The module is accessible at `/ingreso-factura` and is restricted to the **ADMIN** role.
+
+## How It Works
+
+<Steps>
+  <Step title="Navigate to the invoice upload page">
+    The admin opens `/ingreso-factura`. The page displays a drag-and-drop upload zone (`ZonaDrop` component) alongside three feature tiles explaining the supported input types: digital PDF, scanned photo, and automatic line-item detection.
+  </Step>
+  <Step title="Upload a PDF or image file">
+    The admin drags a file onto the drop zone or clicks it to open the file picker. Accepted types are `application/pdf`, `image/jpeg`, `image/png`, and `image/webp`. Files larger than **20 MB** are rejected client-side before any network request is made.
+  </Step>
+  <Step title="Frontend calls the analysis endpoint">
+    On file selection, `IngresoFacturaPage.jsx` calls `facturaService.analizar(file)`, which sends:
+
+    ```
+    POST /api/facturas/analizar
+    Authorization: Bearer <jwt>  (ADMIN only)
+    Content-Type: multipart/form-data
+    ```
+
+    The multipart field name for the file is `archivo`.
+
+    While the backend processes the document, the UI switches to an "Analizando factura con IA…" loading state with a spinner and the filename.
+  </Step>
+  <Step title="Backend extracts text from the document">
+    `FacturaService.analizarFactura()` branches on content type:
+
+    - **`application/pdf`** — Apache PDFBox (`Loader.loadPDF` + `PDFTextStripper`) extracts raw text with positional sorting enabled. This path is fast and highly accurate for digitally generated PDFs.
+    - **Image files (`image/jpeg`, `image/png`, etc.)** — The image is base64-encoded and submitted to the **OCR.space API** (`https://api.ocr.space/parse/image`) with `language=spa`, `isTable=true`, and `OCREngine=2` for best photo accuracy. The extracted `ParsedText` is then parsed character-by-character to handle JSON escaping correctly without regex backtracking issues.
+  </Step>
+  <Step title="Line items are parsed and returned">
+    The extracted text is parsed by `FacturaService.parsearTexto()` using token-based analysis (not complex regex) to identify:
+
+    - **Supplier name** — the first non-date, non-header line near the top of the document
+    - **Invoice number** — matched against patterns like `0001-00012345` or `Factura N° ...`
+    - **Line items** — each row is parsed for a product code (short alphanumeric token), quantity (integer), description, and unit price (Argentine decimal format: `1.234,56`)
+
+    The service then attempts to **match each line item to an existing product** in the catalog by:
+    1. Exact SKU match (`codigoSku` ↔ `producto.sku`)
+    2. Keyword match across the item description against `producto.nombre`
+
+    The result is saved as a `FacturaIngreso` draft with status `BORRADOR` and returned as `FacturaAnalisisResponse`:
+
+    ```java
+    public record FacturaAnalisisResponse(
+        String          proveedor,      // detected supplier name
+        String          numeroFactura,  // detected invoice number
+        List<ItemFacturaDTO> items,     // extracted line items
+        Long            facturaId       // ID of the saved draft
+    ) {}
+    ```
+
+    Each `ItemFacturaDTO` carries `descripcion`, `codigoSku`, `cantidad`, `precioUnitario`, and — if matched — `productoId` and `productoNombre`.
+  </Step>
+  <Step title="Admin reviews and edits extracted items">
+    The UI enters the **revision** stage, showing an editable table (`TablaItems` component). Every cell in the table is directly editable — description, SKU, quantity, and unit price can all be corrected inline. A `BadgeMatch` indicator on each row shows whether the item was automatically linked (green), linked by code only (blue), or unmatched (amber).
+
+    Items without a product link show a **Vincular** dropdown that searches the product catalog by name or SKU and assigns the match. Only linked items are included in the final confirmation payload. The panel also shows running counts of total items, linked items, and unlinked items.
+  </Step>
+  <Step title="Admin confirms the ingestion">
+    When satisfied, the admin clicks **Confirmar ingreso**. The frontend sends:
+
+    ```
+    POST /api/facturas/confirmar
+    Authorization: Bearer <jwt>  (ADMIN only)
+    Content-Type: application/json
+    ```
+
+    `FacturaConfirmarRequest` body:
+
+    ```json
+    {
+      "facturaId": 14,
+      "proveedor": "Distribuidora EPSA",
+      "nroFactura": "0001-00012345",
+      "notas": "Factura N° 0001-00012345",
+      "items": [
+        { "productoId": 42, "codigoSku": null, "cantidad": 10, "precioUnitario": 6420.00 },
+        { "productoId": null, "codigoSku": "NA7520", "cantidad": 5, "precioUnitario": 13938.47 }
+      ]
+    }
+    ```
+
+    Items with neither `productoId` nor `codigoSku` are silently skipped.
+  </Step>
+  <Step title="Stock is updated and the draft is confirmed">
+    For each confirmed item, `FacturaService.confirmarIngreso()` calls `RecepcionService.recibirMercaderia()` internally, which increases `stockActual` on the product, creates a `MovimientoStock` record, and triggers a low-stock alert check. The `FacturaIngreso` record is updated from `BORRADOR` to `CONFIRMADA` with a `confirmadoAt` timestamp. The response is a `List<RecepcionResponse>` showing before/after stock for each product.
+  </Step>
+</Steps>
+
+## Supported File Types
+
+| Format | Extraction method | Notes |
+|---|---|---|
+| **PDF** (text-based) | Apache PDFBox | Highest accuracy; recommended for supplier-generated digital invoices |
+| **PDF** (scanned image) | PDFBox text extraction may return empty; consider uploading the page as an image instead | — |
+| **JPEG / JPG** | OCR.space API (Engine 2, Spanish) | Accuracy depends on print quality and image resolution |
+| **PNG** | OCR.space API (Engine 2, Spanish) | Same as JPEG |
+| **WEBP** | OCR.space API (Engine 2, Spanish) | Same as JPEG |
+
+## File Size Limit
+
+The maximum upload size is **20 MB** per file. This is enforced both client-side (in `ZonaDrop`) and by the Spring Boot multipart configuration:
+
+```properties
+# application.properties
+spring.servlet.multipart.max-file-size=20MB
+spring.servlet.multipart.max-request-size=20MB
+```
+
+Adjust these values in `application.properties` if your supplier invoices routinely exceed this limit.
+
+## OCR Configuration
+
+Image-based extraction uses the **OCR.space** cloud API. The API key is configured in `application.properties` and injected into `FacturaService` via `@Value`:
+
+```properties
+# application.properties
+ocr.space.api.key=YOUR_API_KEY_HERE
+```
+
+```java
+@Value("${ocr.space.api.key}")
+private String ocrSpaceApiKey;
+```
+
+The free tier of OCR.space supports **25,000 API requests per month**. For production environments with high invoice volumes, consider upgrading to a paid OCR.space tier or replacing the cloud call with a self-hosted Tesseract instance via the Tess4j Java wrapper.
+
+The API call is configured with the following parameters for best accuracy on Spanish-language hardware invoices:
+
+| Parameter | Value | Reason |
+|---|---|---|
+| `language` | `spa` | Spanish invoice text |
+| `isTable` | `true` | Improves column alignment detection |
+| `OCREngine` | `2` | Better performance on photographs |
+
+## Invoice History
+
+Past invoice ingestions are listed on the upload page (`/ingreso-factura`) whenever no active upload session is in progress. History is fetched with pagination:
+
+```
+GET /api/facturas?page=0&size=20
+Authorization: Bearer <jwt>  (ADMIN only)
+```
+
+Response shape:
+
+```json
+{
+  "content": [ ... ],
+  "totalElements": 42,
+  "totalPages": 3,
+  "page": 0
+}
+```
+
+Each `FacturaIngresoResumenDTO` entry in `content` includes: `id`, `numeroFactura`, `proveedorNombre`, `archivoNombre`, `cantidadItems`, `estado` (`BORRADOR` | `CONFIRMADA` | `CANCELADA`), and `createdAt`.
+
+<Warning>
+OCR accuracy depends heavily on the print quality and scan resolution of the source invoice. Always review every extracted line item in the revision table before clicking **Confirmar ingreso** — incorrect quantities will update stock levels immediately on confirmation and the operation cannot be undone automatically.
+</Warning>
+
+<Note>
+If you are using image-based OCR via the Tess4j wrapper instead of the OCR.space API, Tesseract must be installed as a native binary on the host machine. Tess4j is a Java JNA wrapper for Tesseract; the underlying C++ engine must be present separately. On Debian/Ubuntu: `apt-get install tesseract-ocr tesseract-ocr-spa`. On macOS: `brew install tesseract`. The language data file for Spanish (`spa.traineddata`) must also be present in the Tesseract `tessdata` directory.
+</Note>

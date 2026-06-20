@@ -1,0 +1,109 @@
+---
+title: "PostgreSQL Database Setup and Connection Configuration"
+sidebarTitle: "Database"
+description: "Set up PostgreSQL 16 for Ferromax ERP, configure HikariCP connection pool settings, and understand the JPA/Hibernate schema management strategy."
+---
+
+Ferromax ERP requires **PostgreSQL 16** as its relational database. The schema is managed by Hibernate with `ddl-auto=update`, meaning tables and columns are created or altered automatically each time the application starts — no manual migration scripts are required during development. This page walks through creating the database, connecting to it, and understanding how the connection pool and ORM are tuned.
+
+## Creating the Database
+
+Before running the application for the first time, create a dedicated database user and database in your PostgreSQL instance. Connect as the `postgres` superuser and run:
+
+```sql
+CREATE USER ferromax_user WITH PASSWORD 'your_secure_password';
+CREATE DATABASE ferromax_db OWNER ferromax_user;
+GRANT ALL PRIVILEGES ON DATABASE ferromax_db TO ferromax_user;
+```
+
+Replace `your_secure_password` with a strong password of your choice, then update `application.properties` to match.
+
+<Note>
+  The values shipped in `application.properties` (`username=postgres`, `password=doky2010`) are local development defaults. **Never** commit production credentials to version control — use environment variable substitution (e.g., `${DB_PASSWORD}`) instead.
+</Note>
+
+## Connection Properties
+
+These four properties tell Spring Boot where to find the database and how to authenticate.
+
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5432/ferromax_db
+spring.datasource.username=ferromax_user
+spring.datasource.password=your_secure_password
+spring.datasource.driver-class-name=org.postgresql.Driver
+```
+
+| Property | Description |
+|---|---|
+| `spring.datasource.url` | JDBC connection URL. Adjust `localhost:5432` if PostgreSQL runs on a different host or port. `ferromax_db` is the target database name. |
+| `spring.datasource.username` | The PostgreSQL user that owns the `ferromax_db` database. |
+| `spring.datasource.password` | Password for the database user. Should be injected from an environment variable in production. |
+| `spring.datasource.driver-class-name` | Explicitly selects the PostgreSQL JDBC driver bundled with the project. |
+
+## HikariCP Connection Pool
+
+Spring Boot uses **HikariCP** as its connection pool by default. The pool is pre-tuned for a mid-traffic hardware store backend — 10 maximum connections with a small idle floor of 2.
+
+| Property | Default | Description |
+|---|---|---|
+| `spring.datasource.hikari.pool-name` | `FerromaxHikariPool` | Logical name shown in JMX and logs to distinguish this pool from others. |
+| `spring.datasource.hikari.maximum-pool-size` | `10` | Maximum number of live connections in the pool. Tune upward if the application is deployed on a server with higher concurrent load. |
+| `spring.datasource.hikari.minimum-idle` | `2` | HikariCP will always maintain at least 2 idle connections ready for immediate use. |
+| `spring.datasource.hikari.connection-timeout` | `30000` ms (30 s) | Maximum time a thread will wait to acquire a connection from the pool before throwing an exception. |
+| `spring.datasource.hikari.idle-timeout` | `600000` ms (10 min) | How long an idle connection may remain in the pool before being closed and removed. |
+| `spring.datasource.hikari.max-lifetime` | `1800000` ms (30 min) | Maximum lifespan of any connection in the pool regardless of activity. Helps avoid stale connections dropped by the database or a firewall. |
+
+<Tip>
+  For a single-server development setup the defaults are sufficient. If you run Ferromax behind a connection-limiting database proxy (e.g., PgBouncer), lower `maximum-pool-size` to match the proxy's per-client limit.
+</Tip>
+
+## JPA / Hibernate Settings
+
+| Property | Value | Description |
+|---|---|---|
+| `spring.jpa.database-platform` | `org.hibernate.dialect.PostgreSQLDialect` | Tells Hibernate to generate PostgreSQL-specific SQL (e.g., `ILIKE`, `RETURNING`). |
+| `spring.jpa.hibernate.ddl-auto` | `update` | On each startup Hibernate compares entity definitions to the live schema and issues `ALTER TABLE` / `CREATE TABLE` statements as needed. It **never drops** existing tables or columns. |
+| `spring.jpa.show-sql` | `false` | Suppresses SQL statement logging in the console. Set to `true` locally when debugging query issues. |
+| `spring.jpa.properties.hibernate.format_sql` | `true` | When `show-sql` is enabled, statements are pretty-printed for readability. |
+| `spring.jpa.properties.hibernate.use_sql_comments` | `true` | Hibernate prepends a comment to each SQL statement identifying the originating HQL query. |
+| `spring.jpa.open-in-view` | `false` | Disables the Open Session in View anti-pattern. Database sessions are closed before the HTTP response is rendered — the recommended setting for REST APIs. |
+
+## Schema Management in Production
+
+<Warning>
+  `ddl-auto=update` is convenient for development but **must not be used in production** without careful review. It can silently alter column types or add columns, but it will never remove obsolete columns or indexes — leaving behind schema drift over time.
+
+  Before deploying to production:
+  1. Switch to `spring.jpa.hibernate.ddl-auto=validate` — Hibernate will verify the schema matches entities and fail fast if there is a mismatch, without making any changes.
+  2. Manage schema changes explicitly with a migration tool such as [Flyway](https://flywaydb.org) or [Liquibase](https://www.liquibase.org).
+</Warning>
+
+## Time Zone
+
+All timestamps in Ferromax are stored and retrieved in **America/Argentina/Buenos_Aires (UTC-3)**. Two properties work together to enforce this:
+
+```properties
+# JVM / Jackson serialization
+spring.jackson.time-zone=America/Argentina/Buenos_Aires
+
+# JDBC layer — controls how Hibernate sends/reads timestamps to/from PostgreSQL
+spring.jpa.properties.hibernate.jdbc.time_zone=America/Argentina/Buenos_Aires
+```
+
+With both set, a `LocalDateTime` of `2024-08-15T10:30:00` is stored in the database as `2024-08-15 10:30:00-03` and returned to API clients as the ISO 8601 string `"2024-08-15T10:30:00"` — no silent UTC conversion occurs.
+
+<Tip>
+  Verify connectivity and database health by calling the Actuator health endpoint after startup:
+
+  ```http
+  GET http://localhost:8081/api/actuator/health
+  ```
+
+  A healthy response looks like:
+
+  ```json
+  { "status": "UP" }
+  ```
+
+  If the database is unreachable, the status will be `DOWN` and the response body will include the JDBC connection error.
+</Tip>

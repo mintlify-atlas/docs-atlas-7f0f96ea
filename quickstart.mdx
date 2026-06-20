@@ -1,47 +1,142 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Ferromax ERP"
+sidebarTitle: "Quickstart"
+description: "Install and run Ferromax ERP locally in under 10 minutes. Covers PostgreSQL setup, Spring Boot backend startup, and React frontend configuration."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+This guide walks you through cloning the repository, configuring a local PostgreSQL database, and starting both the Spring Boot backend and the React frontend so you can log in and explore Ferromax ERP on your own machine. By the end you will have a fully functional instance running with seeded product data and two ready-to-use accounts.
 
 ## Prerequisites
 
-Before you begin, you must have:
+Ensure the following tools are installed and available on your `PATH` before you begin.
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+<Note>
+  **Java 17+** — The backend requires Java 17 or newer. Run `java -version` to confirm. [Download from Adoptium](https://adoptium.net/) if needed.
+</Note>
 
-## Get started
+<Note>
+  **Maven 3.8+** — Used to build and run the Spring Boot application. Run `mvn -version` to confirm.
+</Note>
+
+<Note>
+  **Node.js 18+** — Required by the Vite build toolchain. Run `node -v` to confirm. [Download from nodejs.org](https://nodejs.org/) if needed.
+</Note>
+
+<Note>
+  **PostgreSQL 16** — The application targets PostgreSQL 16. Ensure the `psql` client is also available so you can run the database creation command.
+</Note>
+
+## Installation
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Clone the repository">
+    Clone the Ferromax repository to your local machine and enter the project directory.
 
     ```bash
-    npm install your-package
+    git clone https://github.com/DragonesMagicos/ferromax_v0.8.git
+    cd ferromax_v0.8
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
+  <Step title="Create the PostgreSQL database">
+    Connect to your local PostgreSQL instance and create the application database.
+
+    ```sql
+    CREATE DATABASE ferromax_db;
     ```
+
+    Hibernate's `ddl-auto=update` strategy will create and migrate all tables automatically the first time the backend starts. You do not need to run any schema scripts manually.
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Configure application.properties">
+    Open `src/main/resources/application.properties` and replace the placeholder credentials with your local PostgreSQL username and password.
+
+    ```properties
+    spring.datasource.url=jdbc:postgresql://localhost:5432/ferromax_db
+    spring.datasource.username=TU_USUARIO
+    spring.datasource.password=TU_PASSWORD
+    ```
+
+    <Warning>
+      Never commit real credentials to version control. Consider using environment variables or a `.env` file excluded by `.gitignore` for team environments.
+    </Warning>
+  </Step>
+
+  <Step title="Start the backend">
+    From the project root, build and start the Spring Boot application with Maven.
 
     ```bash
-    your-cli start
+    mvn spring-boot:run
     ```
+
+    The API server starts on **port 8081** with base path **`/api`**. You should see a log line similar to:
+
+    ```
+    Started FerromaxErpApplication in 4.2 seconds (process running for 4.8)
+    ```
+
+    Hibernate will create all database tables on this first run. The data initializer will also seed the default admin and employee accounts.
+  </Step>
+
+  <Step title="Add product images">
+    Product images are not included in the repository because of their size (~213 MB). Request the `img.zip` archive from your team and extract its contents into the frontend public directory.
+
+    ```
+    ferromax-web/public/img/
+    ```
+
+    The frontend references images by filename at this path. Without the images the application works normally — product cards will display broken image placeholders until the files are in place.
+  </Step>
+
+  <Step title="Install frontend dependencies and start the dev server">
+    Open a second terminal, navigate to the `ferromax-web` directory, install Node dependencies, and start the Vite development server.
+
+    ```bash
+    cd ferromax-web
+    npm install
+    npm run dev
+    ```
+
+    The React SPA is served at **[http://localhost:5173](http://localhost:5173)**. Vite's hot-module replacement (HMR) is active by default, so source changes reflect immediately without a full page reload.
+  </Step>
+
+  <Step title="Log in and explore">
+    Open [http://localhost:5173](http://localhost:5173) in your browser. Two accounts are available immediately after the first backend startup.
+
+    | Email | Password | Access |
+    |---|---|---|
+    | jose@ferromax.com | admin123 | Full ERP: dashboard, POS, inventory, remitos, stock adjustments, invoice OCR |
+    | manuel@ferromax.com | emp123 | Restricted ERP: POS terminal, product lookup, stock reception, pending orders |
+
+    <Tip>
+      Log in as **jose@ferromax.com** first to see the full dashboard with KPIs and stock alerts. Then open a second browser window (or an incognito tab) as **manuel@ferromax.com** to explore the employee-scoped POS view side by side.
+    </Tip>
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Verify the Installation
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+Confirm the backend is running correctly by hitting the login endpoint directly with `curl`.
+
+```bash
+curl -s -X POST http://localhost:8081/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"jose@ferromax.com","password":"admin123"}' | jq
+```
+
+A successful response looks like this:
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9...",
+  "rol": "ADMIN",
+  "nombre": "José",
+  "mensaje": "Login exitoso"
+}
+```
+
+Copy the `token` value — you can pass it as `Authorization: Bearer <token>` in subsequent requests to test protected endpoints while the frontend is running.
+
+<Note>
+  The **Invoice OCR** feature (`/ingreso-factura`) requires [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) to be installed on the host operating system and available on the system `PATH`. The application starts and functions fully without it, but image-based invoice scanning will fail with an error until Tesseract is present.
+</Note>
